@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "chanjet-tcloud-mcp"
 version = "0.1.0"
-description = "MCP server for Chanjet T+Cloud OpenAPI documentation and API calls"
+description = "MCP server for Chanjet T+Cloud and HYC/ZPlus OpenAPI documentation and API calls"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
@@ -13,8 +13,9 @@ dependencies = [
 ]
 
 [project.scripts]
+chanjet-mcp = "chanjet_tcloud_mcp.server:main"
 chanjet-tcloud-mcp = "chanjet_tcloud_mcp.server:main"
+hyc-mcp = "chanjet_tcloud_mcp.server:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
-

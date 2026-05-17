@@ -10,6 +10,10 @@ from .settings import ChanjetSettings
 from .transport import JsonTransport, UrlLibTransport
 
 
+TCLOUD_PRODUCT_CODE = "tcloud"
+HYC_PRODUCT_CODE = "zplus"
+
+
 class ChanjetApiError(RuntimeError):
     def __init__(
         self,
@@ -43,13 +47,28 @@ class ChanjetTCloudClient:
         self.settings = settings or ChanjetSettings.from_env_file()
         self.transport = transport or UrlLibTransport(self.settings.timeout_seconds)
 
-    def list_tcloud_modules(self) -> dict[str, Any]:
+    def list_modules(self, product_code: str) -> dict[str, Any]:
+        if not product_code:
+            raise ValueError("product_code is required")
         response = self.transport.request(
-            "GET", self._docs_url("doc-center", "modulesNameByCode", "tcloud")
+            "GET", self._docs_url("doc-center", "modulesNameByCode", product_code)
         )
         return self._unwrap_docs_response(response)
 
-    def get_tcloud_doc(self, parent_code: str, module_code: str) -> dict[str, Any]:
+    def list_tcloud_modules(self) -> dict[str, Any]:
+        return self.list_modules(TCLOUD_PRODUCT_CODE)
+
+    def list_hyc_modules(self) -> dict[str, Any]:
+        return self.list_modules(HYC_PRODUCT_CODE)
+
+    def get_doc(
+        self,
+        product_code: str,
+        parent_code: str,
+        module_code: str,
+    ) -> dict[str, Any]:
+        if not product_code:
+            raise ValueError("product_code is required")
         if not parent_code or not module_code:
             raise ValueError("parent_code and module_code are required")
         response = self.transport.request(
@@ -57,20 +76,33 @@ class ChanjetTCloudClient:
             self._docs_url(
                 "doc-center",
                 "details",
-                "tcloud",
+                product_code,
                 parent_code,
                 module_code,
             ),
         )
         return self._unwrap_docs_response(response)
 
-    def search_tcloud_docs(self, query: str, limit: int = 20) -> list[dict[str, Any]]:
+    def get_tcloud_doc(self, parent_code: str, module_code: str) -> dict[str, Any]:
+        return self.get_doc(TCLOUD_PRODUCT_CODE, parent_code, module_code)
+
+    def get_hyc_doc(self, parent_code: str, module_code: str) -> dict[str, Any]:
+        return self.get_doc(HYC_PRODUCT_CODE, parent_code, module_code)
+
+    def search_docs(
+        self,
+        product_code: str,
+        query: str,
+        limit: int = 20,
+    ) -> list[dict[str, Any]]:
+        if not product_code:
+            raise ValueError("product_code is required")
         if not query:
             raise ValueError("query is required")
         normalized_query = query.casefold()
         matches: list[dict[str, Any]] = []
 
-        module_tree = self.list_tcloud_modules()
+        module_tree = self.list_modules(product_code)
         for parent in module_tree.get("children") or []:
             parent_code = parent.get("moduleCode", "")
             parent_name = parent.get("moduleName", "")
@@ -90,14 +122,20 @@ class ChanjetTCloudClient:
                         "parent_name": parent_name,
                         "module_code": module_code,
                         "module_name": module_name,
-                        "path": ["tcloud", parent_code, module_code],
+                        "path": [product_code, parent_code, module_code],
                     }
                 )
                 if len(matches) >= limit:
                     return matches
         return matches
 
-    def call_tplus_api(
+    def search_tcloud_docs(self, query: str, limit: int = 20) -> list[dict[str, Any]]:
+        return self.search_docs(TCLOUD_PRODUCT_CODE, query, limit)
+
+    def search_hyc_docs(self, query: str, limit: int = 20) -> list[dict[str, Any]]:
+        return self.search_docs(HYC_PRODUCT_CODE, query, limit)
+
+    def call_chanjet_api(
         self,
         path: str,
         *,
@@ -113,7 +151,7 @@ class ChanjetTCloudClient:
 
         normalized_path = path if path.startswith("/") else f"/{path}"
         merged_headers = dict(headers or {})
-        merged_headers.update(self.settings.tplus_headers())
+        merged_headers.update(self.settings.openapi_headers())
 
         return self.transport.request(
             method.upper(),
@@ -121,6 +159,40 @@ class ChanjetTCloudClient:
             headers=merged_headers,
             params=query,
             json_body=body,
+        )
+
+    def call_tplus_api(
+        self,
+        path: str,
+        *,
+        method: str = "POST",
+        body: Any = None,
+        query: dict[str, Any] | None = None,
+        headers: dict[str, str] | None = None,
+    ) -> Any:
+        return self.call_chanjet_api(
+            path=path,
+            method=method,
+            body=body,
+            query=query,
+            headers=headers,
+        )
+
+    def call_hyc_api(
+        self,
+        path: str,
+        *,
+        method: str = "POST",
+        body: Any = None,
+        query: dict[str, Any] | None = None,
+        headers: dict[str, str] | None = None,
+    ) -> Any:
+        return self.call_chanjet_api(
+            path=path,
+            method=method,
+            body=body,
+            query=query,
+            headers=headers,
         )
 
     def get_auth_url(
@@ -275,4 +347,3 @@ class ChanjetTCloudClient:
             if value is not None and value != ""
         )
         return hashlib.md5(sign_string.encode("utf-8")).hexdigest().upper()
-

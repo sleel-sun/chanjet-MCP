@@ -53,7 +53,7 @@ class ChanjetSettings:
             timeout_seconds=timeout_seconds,
         )
 
-    def tplus_headers(self) -> dict[str, str]:
+    def openapi_headers(self) -> dict[str, str]:
         missing = [
             name
             for name, value in (
@@ -74,6 +74,9 @@ class ChanjetSettings:
             "Accept": "application/json",
         }
 
+    def tplus_headers(self) -> dict[str, str]:
+        return self.openapi_headers()
+
 
 def _read_env_file(path: Path) -> dict[str, str]:
     if not path.exists():
@@ -90,4 +93,3 @@ def _read_env_file(path: Path) -> dict[str, str]:
         if key:
             values[key] = value
     return values
-

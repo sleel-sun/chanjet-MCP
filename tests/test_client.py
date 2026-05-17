@@ -130,6 +130,114 @@ class ClientTests(unittest.TestCase):
             ],
         )
 
+    def test_list_hyc_modules_uses_zplus_product_code(self):
+        client, transport = self.make_client(
+            [
+                {
+                    "result": True,
+                    "error": None,
+                    "value": {
+                        "productCode": "zplus",
+                        "productName": "好业财API",
+                        "children": [],
+                    },
+                }
+            ]
+        )
+
+        result = client.list_hyc_modules()
+
+        self.assertEqual(result["productCode"], "zplus")
+        self.assertEqual(result["productName"], "好业财API")
+        self.assertEqual(
+            transport.calls[0]["url"],
+            "https://openapi.chanjet.com/developer/api/doc-center/modulesNameByCode/zplus",
+        )
+
+    def test_get_hyc_doc_encodes_zplus_module_codes(self):
+        client, transport = self.make_client(
+            [
+                {
+                    "result": True,
+                    "error": None,
+                    "value": {"modulePath": "好业财API", "documentApiInfoList": []},
+                }
+            ]
+        )
+
+        result = client.get_hyc_doc("zjjcda", " hyc_msg")
+
+        self.assertEqual(result["modulePath"], "好业财API")
+        self.assertEqual(
+            transport.calls[0]["url"],
+            "https://openapi.chanjet.com/developer/api/doc-center/details/zplus/zjjcda/%20hyc_msg",
+        )
+
+    def test_search_hyc_docs_matches_module_code_and_name(self):
+        client, _transport = self.make_client(
+            [
+                {
+                    "result": True,
+                    "error": None,
+                    "value": {
+                        "productCode": "zplus",
+                        "children": [
+                            {
+                                "moduleCode": "zjjcda",
+                                "moduleName": "好业财基础档案",
+                                "children": [
+                                    {
+                                        "moduleCode": "ck",
+                                        "moduleName": "仓库",
+                                    },
+                                    {
+                                        "moduleCode": "sp",
+                                        "moduleName": "商品",
+                                    },
+                                ],
+                            }
+                        ],
+                    },
+                }
+            ]
+        )
+
+        result = client.search_hyc_docs("仓库")
+
+        self.assertEqual(
+            result,
+            [
+                {
+                    "parent_code": "zjjcda",
+                    "parent_name": "好业财基础档案",
+                    "module_code": "ck",
+                    "module_name": "仓库",
+                    "path": ["zplus", "zjjcda", "ck"],
+                }
+            ],
+        )
+
+    def test_call_hyc_api_injects_auth_headers_and_body(self):
+        client, transport = self.make_client(
+            [{"code": "openApi.e0000", "data": {"count": 1}}]
+        )
+
+        result = client.call_hyc_api(
+            "/accounting/openapi/cc/warehouse/list/123",
+            body={"pageSize": 20, "pageNo": 1},
+        )
+
+        self.assertEqual(result, {"code": "openApi.e0000", "data": {"count": 1}})
+        self.assertEqual(
+            transport.calls[0]["url"],
+            "https://openapi.chanjet.com/accounting/openapi/cc/warehouse/list/123",
+        )
+        self.assertEqual(transport.calls[0]["method"], "POST")
+        self.assertEqual(transport.calls[0]["headers"]["appKey"], "app-key")
+        self.assertEqual(transport.calls[0]["headers"]["appSecret"], "app-secret")
+        self.assertEqual(transport.calls[0]["headers"]["openToken"], "open-token")
+        self.assertEqual(transport.calls[0]["json_body"], {"pageSize": 20, "pageNo": 1})
+
     def test_document_api_error_includes_code_message_and_trace(self):
         client, _transport = self.make_client(
             [
@@ -233,4 +341,3 @@ class ClientTests(unittest.TestCase):
         self.assertEqual(transport.calls[0]["params"]["grant_type"], "authorization_code")
         self.assertEqual(transport.calls[0]["params"]["code"], "auth-code")
         self.assertIn("sign", transport.calls[0]["params"])
-
