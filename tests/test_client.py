@@ -238,6 +238,131 @@ class ClientTests(unittest.TestCase):
         self.assertEqual(transport.calls[0]["headers"]["openToken"], "open-token")
         self.assertEqual(transport.calls[0]["json_body"], {"pageSize": 20, "pageNo": 1})
 
+    def test_list_ydz_modules_uses_finance_product_code(self):
+        client, transport = self.make_client(
+            [
+                {
+                    "result": True,
+                    "error": None,
+                    "value": {
+                        "productCode": "finance",
+                        "productName": "易代账",
+                        "children": [],
+                    },
+                }
+            ]
+        )
+
+        result = client.list_ydz_modules()
+
+        self.assertEqual(result["productCode"], "finance")
+        self.assertEqual(result["productName"], "易代账")
+        self.assertEqual(
+            transport.calls[0]["url"],
+            "https://openapi.chanjet.com/developer/api/doc-center/modulesNameByCode/finance",
+        )
+
+    def test_get_ydz_doc_uses_finance_product_code(self):
+        client, transport = self.make_client(
+            [
+                {
+                    "result": True,
+                    "error": None,
+                    "value": {"modulePath": "易代账API", "documentApiInfoList": []},
+                }
+            ]
+        )
+
+        result = client.get_ydz_doc("ydzjcda", "ck")
+
+        self.assertEqual(result["modulePath"], "易代账API")
+        self.assertEqual(
+            transport.calls[0]["url"],
+            "https://openapi.chanjet.com/developer/api/doc-center/details/finance/ydzjcda/ck",
+        )
+
+    def test_search_ydz_docs_matches_module_code_and_name(self):
+        client, _transport = self.make_client(
+            [
+                {
+                    "result": True,
+                    "error": None,
+                    "value": {
+                        "productCode": "finance",
+                        "children": [
+                            {
+                                "moduleCode": "ydzjcda",
+                                "moduleName": "易代账-基础档案",
+                                "children": [
+                                    {
+                                        "moduleCode": "ck",
+                                        "moduleName": "仓库",
+                                    },
+                                    {
+                                        "moduleCode": "sp",
+                                        "moduleName": "商品",
+                                    },
+                                ],
+                            }
+                        ],
+                    },
+                }
+            ]
+        )
+
+        result = client.search_ydz_docs("仓库")
+
+        self.assertEqual(
+            result,
+            [
+                {
+                    "parent_code": "ydzjcda",
+                    "parent_name": "易代账-基础档案",
+                    "module_code": "ck",
+                    "module_name": "仓库",
+                    "path": ["finance", "ydzjcda", "ck"],
+                }
+            ],
+        )
+
+    def test_call_ydz_api_injects_auth_headers_and_body(self):
+        client, transport = self.make_client(
+            [{"successResultMap": {"WH001": "123"}, "failResultMap": {}}]
+        )
+
+        result = client.call_ydz_api(
+            "/accounting/document/integration/warehouse/batchUpsertt/123",
+            body=[
+                {
+                    "id": "WH001",
+                    "code": "WH001",
+                    "name": "仓库",
+                    "statusEnum": "A",
+                }
+            ],
+        )
+
+        self.assertEqual(result, {"successResultMap": {"WH001": "123"}, "failResultMap": {}})
+        self.assertEqual(
+            transport.calls[0]["url"],
+            "https://openapi.chanjet.com/accounting/document/integration/warehouse/batchUpsertt/123",
+        )
+        self.assertEqual(transport.calls[0]["method"], "POST")
+        self.assertEqual(transport.calls[0]["headers"]["appKey"], "app-key")
+        self.assertEqual(transport.calls[0]["headers"]["appSecret"], "app-secret")
+        self.assertEqual(transport.calls[0]["headers"]["openToken"], "open-token")
+        self.assertEqual(
+            transport.calls[0]["json_body"],
+            [
+                {
+                    "id": "WH001",
+                    "code": "WH001",
+                    "name": "仓库",
+                    "statusEnum": "A",
+                }
+            ],
+        )
+
     def test_document_api_error_includes_code_message_and_trace(self):
         client, _transport = self.make_client(
             [
