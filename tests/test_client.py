@@ -363,6 +363,134 @@ class ClientTests(unittest.TestCase):
             ],
         )
 
+    def test_list_hkj_modules_uses_accounting_product_code(self):
+        client, transport = self.make_client(
+            [
+                {
+                    "result": True,
+                    "error": None,
+                    "value": {
+                        "productCode": "accounting",
+                        "productName": "好会计API",
+                        "children": [],
+                    },
+                }
+            ]
+        )
+
+        result = client.list_hkj_modules()
+
+        self.assertEqual(result["productCode"], "accounting")
+        self.assertEqual(result["productName"], "好会计API")
+        self.assertEqual(
+            transport.calls[0]["url"],
+            "https://openapi.chanjet.com/developer/api/doc-center/modulesNameByCode/accounting",
+        )
+
+    def test_get_hkj_doc_uses_accounting_product_code(self):
+        client, transport = self.make_client(
+            [
+                {
+                    "result": True,
+                    "error": None,
+                    "value": {"modulePath": "好会计API", "documentApiInfoList": []},
+                }
+            ]
+        )
+
+        result = client.get_hkj_doc("jcda", "ck")
+
+        self.assertEqual(result["modulePath"], "好会计API")
+        self.assertEqual(
+            transport.calls[0]["url"],
+            "https://openapi.chanjet.com/developer/api/doc-center/details/accounting/jcda/ck",
+        )
+
+    def test_search_hkj_docs_matches_module_code_and_name(self):
+        client, _transport = self.make_client(
+            [
+                {
+                    "result": True,
+                    "error": None,
+                    "value": {
+                        "productCode": "accounting",
+                        "children": [
+                            {
+                                "moduleCode": "jcda",
+                                "moduleName": "基础档案",
+                                "children": [
+                                    {
+                                        "moduleCode": "ck",
+                                        "moduleName": "仓库",
+                                    },
+                                    {
+                                        "moduleCode": "sp",
+                                        "moduleName": "商品",
+                                    },
+                                ],
+                            }
+                        ],
+                    },
+                }
+            ]
+        )
+
+        result = client.search_hkj_docs("仓库")
+
+        self.assertEqual(
+            result,
+            [
+                {
+                    "parent_code": "jcda",
+                    "parent_name": "基础档案",
+                    "module_code": "ck",
+                    "module_name": "仓库",
+                    "path": ["accounting", "jcda", "ck"],
+                }
+            ],
+        )
+
+    def test_call_hkj_api_injects_auth_headers_and_body(self):
+        client, transport = self.make_client(
+            [{"successResultMap": {"HKJ001": "123"}, "failResultMap": {}}]
+        )
+
+        result = client.call_hkj_api(
+            "/accounting/document/integration/warehouse/batchUpsertt/123",
+            body=[
+                {
+                    "id": "HKJ001",
+                    "code": "HKJ001",
+                    "name": "仓库",
+                    "statusEnum": "A",
+                }
+            ],
+        )
+
+        self.assertEqual(
+            result,
+            {"successResultMap": {"HKJ001": "123"}, "failResultMap": {}},
+        )
+        self.assertEqual(
+            transport.calls[0]["url"],
+            "https://openapi.chanjet.com/accounting/document/integration/warehouse/batchUpsertt/123",
+        )
+        self.assertEqual(transport.calls[0]["method"], "POST")
+        self.assertEqual(transport.calls[0]["headers"]["appKey"], "app-key")
+        self.assertEqual(transport.calls[0]["headers"]["appSecret"], "app-secret")
+        self.assertEqual(transport.calls[0]["headers"]["openToken"], "open-token")
+        self.assertEqual(
+            transport.calls[0]["json_body"],
+            [
+                {
+                    "id": "HKJ001",
+                    "code": "HKJ001",
+                    "name": "仓库",
+                    "statusEnum": "A",
+                }
+            ],
+        )
+
     def test_document_api_error_includes_code_message_and_trace(self):
         client, _transport = self.make_client(
             [

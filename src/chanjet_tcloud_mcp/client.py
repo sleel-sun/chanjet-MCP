@@ -13,6 +13,7 @@ from .transport import JsonTransport, UrlLibTransport
 TCLOUD_PRODUCT_CODE = "tcloud"
 HYC_PRODUCT_CODE = "zplus"
 YDZ_PRODUCT_CODE = "finance"
+HKJ_PRODUCT_CODE = "accounting"
 
 
 class ChanjetApiError(RuntimeError):
@@ -65,6 +66,9 @@ class ChanjetTCloudClient:
     def list_ydz_modules(self) -> dict[str, Any]:
         return self.list_modules(YDZ_PRODUCT_CODE)
 
+    def list_hkj_modules(self) -> dict[str, Any]:
+        return self.list_modules(HKJ_PRODUCT_CODE)
+
     def get_doc(
         self,
         product_code: str,
@@ -95,6 +99,9 @@ class ChanjetTCloudClient:
 
     def get_ydz_doc(self, parent_code: str, module_code: str) -> dict[str, Any]:
         return self.get_doc(YDZ_PRODUCT_CODE, parent_code, module_code)
+
+    def get_hkj_doc(self, parent_code: str, module_code: str) -> dict[str, Any]:
+        return self.get_doc(HKJ_PRODUCT_CODE, parent_code, module_code)
 
     def search_docs(
         self,
@@ -144,6 +151,9 @@ class ChanjetTCloudClient:
 
     def search_ydz_docs(self, query: str, limit: int = 20) -> list[dict[str, Any]]:
         return self.search_docs(YDZ_PRODUCT_CODE, query, limit)
+
+    def search_hkj_docs(self, query: str, limit: int = 20) -> list[dict[str, Any]]:
+        return self.search_docs(HKJ_PRODUCT_CODE, query, limit)
 
     def call_chanjet_api(
         self,
@@ -206,6 +216,23 @@ class ChanjetTCloudClient:
         )
 
     def call_ydz_api(
+        self,
+        path: str,
+        *,
+        method: str = "POST",
+        body: Any = None,
+        query: dict[str, Any] | None = None,
+        headers: dict[str, str] | None = None,
+    ) -> Any:
+        return self.call_chanjet_api(
+            path=path,
+            method=method,
+            body=body,
+            query=query,
+            headers=headers,
+        )
+
+    def call_hkj_api(
         self,
         path: str,
         *,
