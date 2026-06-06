@@ -92,6 +92,7 @@ def call_tplus_api(
     body: dict[str, Any] | list[Any] | None = None,
     query: dict[str, Any] | None = None,
     headers: dict[str, str] | None = None,
+    account_alias: str | None = None,
 ) -> Any:
     """Call an arbitrary T+ OpenAPI path using configured Chanjet credentials."""
     return client.call_tplus_api(
@@ -100,6 +101,7 @@ def call_tplus_api(
         body=body,
         query=query,
         headers=headers,
+        account_alias=account_alias,
     )
 
 
@@ -110,6 +112,7 @@ def call_hyc_api(
     body: dict[str, Any] | list[Any] | None = None,
     query: dict[str, Any] | None = None,
     headers: dict[str, str] | None = None,
+    account_alias: str | None = None,
 ) -> Any:
     """Call an arbitrary HYC/ZPlus OpenAPI path using configured credentials."""
     return client.call_hyc_api(
@@ -118,6 +121,7 @@ def call_hyc_api(
         body=body,
         query=query,
         headers=headers,
+        account_alias=account_alias,
     )
 
 
@@ -128,6 +132,7 @@ def call_ydz_api(
     body: dict[str, Any] | list[Any] | None = None,
     query: dict[str, Any] | None = None,
     headers: dict[str, str] | None = None,
+    account_alias: str | None = None,
 ) -> Any:
     """Call an arbitrary YDZ/Finance OpenAPI path using configured credentials."""
     return client.call_ydz_api(
@@ -136,6 +141,7 @@ def call_ydz_api(
         body=body,
         query=query,
         headers=headers,
+        account_alias=account_alias,
     )
 
 
@@ -146,6 +152,7 @@ def call_hkj_api(
     body: dict[str, Any] | list[Any] | None = None,
     query: dict[str, Any] | None = None,
     headers: dict[str, str] | None = None,
+    account_alias: str | None = None,
 ) -> Any:
     """Call an arbitrary HKJ/Accounting OpenAPI path using configured credentials."""
     return client.call_hkj_api(
@@ -154,6 +161,7 @@ def call_hkj_api(
         body=body,
         query=query,
         headers=headers,
+        account_alias=account_alias,
     )
 
 
@@ -167,6 +175,44 @@ def get_auth_url(redirect_uri: str, state: str | None = None) -> str:
 def exchange_token(code: str, redirect_uri: str) -> dict[str, Any]:
     """Exchange a temporary authorization code for token data."""
     return client.exchange_token(code=code, redirect_uri=redirect_uri)
+
+
+@mcp.tool()
+def oauth_complete_setup(
+    code: str,
+    redirect_uri: str,
+    account_alias: str,
+) -> dict[str, Any]:
+    """Exchange an OAuth code and store tokens under a named Chanjet account."""
+    return client.oauth_complete_setup(
+        code=code,
+        redirect_uri=redirect_uri,
+        account_alias=account_alias,
+    )
+
+
+@mcp.tool()
+def list_auth_accounts() -> list[dict[str, Any]]:
+    """Return safe summaries for stored Chanjet authorization accounts."""
+    return client.list_auth_accounts()
+
+
+@mcp.tool()
+def get_active_account() -> dict[str, Any] | None:
+    """Return the current active Chanjet authorization account summary."""
+    return client.get_active_account()
+
+
+@mcp.tool()
+def set_active_account(account_alias: str) -> dict[str, Any]:
+    """Set the active Chanjet authorization account."""
+    return client.set_active_account(account_alias=account_alias)
+
+
+@mcp.tool()
+def delete_auth_account(account_alias: str) -> dict[str, Any]:
+    """Delete a stored Chanjet authorization account."""
+    return client.delete_auth_account(account_alias=account_alias)
 
 
 @mcp.tool()
