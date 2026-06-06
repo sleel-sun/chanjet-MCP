@@ -3,4 +3,4 @@ __pycache__/
 *.py[cod]
 *.egg-info/
 .env
-
+.chanjet_tokens.json

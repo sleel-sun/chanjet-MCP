@@ -5,6 +5,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Mapping
 
+from .token_store import DEFAULT_TOKEN_STORE_PATH
+
 
 DEFAULT_BASE_URL = "https://openapi.chanjet.com"
 DEFAULT_DOCS_API_URL = "https://openapi.chanjet.com/developer/api"
@@ -16,6 +18,8 @@ class ChanjetSettings:
     app_secret: str | None = None
     open_token: str | None = None
     refresh_token: str | None = None
+    active_account: str | None = None
+    token_store_path: str = DEFAULT_TOKEN_STORE_PATH
     base_url: str = DEFAULT_BASE_URL
     docs_api_url: str = DEFAULT_DOCS_API_URL
     timeout_seconds: float = 30.0
@@ -43,6 +47,11 @@ class ChanjetSettings:
             app_secret=get("CHANJET_APP_SECRET"),
             open_token=get("CHANJET_OPEN_TOKEN"),
             refresh_token=get("CHANJET_REFRESH_TOKEN"),
+            active_account=get("CHANJET_ACTIVE_ACCOUNT"),
+            token_store_path=(
+                get("CHANJET_TOKEN_STORE_PATH", DEFAULT_TOKEN_STORE_PATH)
+                or DEFAULT_TOKEN_STORE_PATH
+            ),
             base_url=(get("CHANJET_BASE_URL", DEFAULT_BASE_URL) or DEFAULT_BASE_URL).rstrip(
                 "/"
             ),
@@ -53,13 +62,14 @@ class ChanjetSettings:
             timeout_seconds=timeout_seconds,
         )
 
-    def openapi_headers(self) -> dict[str, str]:
+    def openapi_headers(self, open_token: str | None = None) -> dict[str, str]:
+        token = open_token or self.open_token
         missing = [
             name
             for name, value in (
                 ("CHANJET_APP_KEY", self.app_key),
                 ("CHANJET_APP_SECRET", self.app_secret),
-                ("CHANJET_OPEN_TOKEN", self.open_token),
+                ("CHANJET_OPEN_TOKEN", token),
             )
             if not value
         ]
@@ -69,7 +79,7 @@ class ChanjetSettings:
         return {
             "appKey": self.app_key or "",
             "appSecret": self.app_secret or "",
-            "openToken": self.open_token or "",
+            "openToken": token or "",
             "Content-Type": "application/json",
             "Accept": "application/json",
         }

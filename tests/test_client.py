@@ -1,7 +1,10 @@
 import unittest
+import tempfile
+from pathlib import Path
 
 from chanjet_tcloud_mcp.client import ChanjetApiError, ChanjetTCloudClient
 from chanjet_tcloud_mcp.settings import ChanjetSettings
+from chanjet_tcloud_mcp.token_store import TokenStore
 
 
 class FakeTransport:
@@ -25,14 +28,21 @@ class FakeTransport:
 
 
 class ClientTests(unittest.TestCase):
-    def make_client(self, responses, settings=None):
+    def make_client(self, responses, settings=None, token_store=None):
         settings = settings or ChanjetSettings(
             app_key="app-key",
             app_secret="app-secret",
             open_token="open-token",
         )
         transport = FakeTransport(responses)
-        return ChanjetTCloudClient(settings=settings, transport=transport), transport
+        return (
+            ChanjetTCloudClient(
+                settings=settings,
+                transport=transport,
+                token_store=token_store,
+            ),
+            transport,
+        )
 
     def test_list_tcloud_modules_unwraps_official_document_envelope(self):
         client, transport = self.make_client(
@@ -594,3 +604,232 @@ class ClientTests(unittest.TestCase):
         self.assertEqual(transport.calls[0]["params"]["grant_type"], "authorization_code")
         self.assertEqual(transport.calls[0]["params"]["code"], "auth-code")
         self.assertIn("sign", transport.calls[0]["params"])
+
+    def test_oauth_complete_setup_stores_account_without_returning_token_values(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            token_store = TokenStore(Path(tmp_dir) / "tokens.json")
+            settings = ChanjetSettings(app_key="app-key", app_secret="app-secret")
+            client, transport = self.make_client(
+                [
+                    {
+                        "code": "200",
+                        "result": {
+                            "accessToken": "stored-open-token",
+                            "refreshToken": "stored-refresh-token",
+                            "expiresIn": 600,
+                            "orgId": "org-1",
+                        },
+                    }
+                ],
+                settings=settings,
+                token_store=token_store,
+            )
+
+            summary = client.oauth_complete_setup(
+                code="auth-code",
+                redirect_uri="https://example.test/oauth/callback",
+                account_alias="company-a",
+                timestamp="1700000300",
+                nonce="nonce-3",
+                now=1_000,
+            )
+
+            self.assertEqual(summary["account_alias"], "company-a")
+            self.assertTrue(summary["active"])
+            self.assertTrue(summary["has_open_token"])
+            self.assertTrue(summary["has_refresh_token"])
+            self.assertEqual(summary["expires_at"], 1_600)
+            self.assertNotIn("stored-open-token", str(summary))
+            self.assertNotIn("stored-refresh-token", str(summary))
+            self.assertEqual(
+                token_store.get_account("company-a")["open_token"],
+                "stored-open-token",
+            )
+            self.assertEqual(transport.calls[0]["params"]["grant_type"], "authorization_code")
+
+    def test_call_api_uses_selected_stored_account_token(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            token_store = TokenStore(Path(tmp_dir) / "tokens.json")
+            token_store.save_token_response(
+                "company-a",
+                {
+                    "access_token": "stored-open-token",
+                    "refresh_token": "stored-refresh-token",
+                },
+                make_active=True,
+            )
+            settings = ChanjetSettings(app_key="app-key", app_secret="app-secret")
+            client, transport = self.make_client(
+                [{"code": "0", "data": []}],
+                settings=settings,
+                token_store=token_store,
+            )
+
+            result = client.call_tplus_api(
+                "/tplus/api/v2/warehouse/Query",
+                body={"param": {"Code": "01"}},
+                account_alias="company-a",
+            )
+
+            self.assertEqual(result, {"code": "0", "data": []})
+            self.assertEqual(
+                transport.calls[0]["headers"]["openToken"],
+                "stored-open-token",
+            )
+
+    def test_set_active_account_overrides_configured_default_account(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            token_store = TokenStore(Path(tmp_dir) / "tokens.json")
+            token_store.save_token_response(
+                "company-a",
+                {"access_token": "open-token-a", "refresh_token": "refresh-token-a"},
+            )
+            token_store.save_token_response(
+                "company-b",
+                {"access_token": "open-token-b", "refresh_token": "refresh-token-b"},
+            )
+            settings = ChanjetSettings(
+                app_key="app-key",
+                app_secret="app-secret",
+                active_account="company-a",
+            )
+            client, transport = self.make_client(
+                [{"code": "0", "data": []}],
+                settings=settings,
+                token_store=token_store,
+            )
+
+            client.set_active_account("company-b")
+            client.call_tplus_api("/tplus/api/v2/warehouse/Query")
+
+            self.assertEqual(
+                transport.calls[0]["headers"]["openToken"],
+                "open-token-b",
+            )
+
+    def test_call_api_refreshes_missing_stored_open_token(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            token_store = TokenStore(Path(tmp_dir) / "tokens.json")
+            token_store.save_token_response(
+                "company-a",
+                {"refresh_token": "stored-refresh-token"},
+                make_active=True,
+            )
+            settings = ChanjetSettings(app_key="app-key", app_secret="app-secret")
+            client, transport = self.make_client(
+                [
+                    {
+                        "code": "200",
+                        "result": {
+                            "accessToken": "refreshed-open-token",
+                            "refreshToken": "refreshed-refresh-token",
+                            "expiresIn": 600,
+                        },
+                    },
+                    {"code": "0", "data": []},
+                ],
+                settings=settings,
+                token_store=token_store,
+            )
+
+            result = client.call_tplus_api(
+                "/tplus/api/v2/warehouse/Query",
+                body={"param": {"Code": "01"}},
+                account_alias="company-a",
+            )
+
+            self.assertEqual(result, {"code": "0", "data": []})
+            self.assertEqual(transport.calls[0]["url"], "https://openapi.chanjet.com/auth/token")
+            self.assertEqual(transport.calls[0]["params"]["grant_type"], "refresh_token")
+            self.assertEqual(
+                transport.calls[1]["headers"]["openToken"],
+                "refreshed-open-token",
+            )
+            self.assertEqual(
+                token_store.get_account("company-a")["open_token"],
+                "refreshed-open-token",
+            )
+
+    def test_call_api_refreshes_once_and_retries_expired_token_response(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            token_store = TokenStore(Path(tmp_dir) / "tokens.json")
+            token_store.save_token_response(
+                "company-a",
+                {
+                    "access_token": "expired-open-token",
+                    "refresh_token": "stored-refresh-token",
+                },
+                make_active=True,
+            )
+            settings = ChanjetSettings(app_key="app-key", app_secret="app-secret")
+            client, transport = self.make_client(
+                [
+                    {"code": "401", "message": "openToken expired"},
+                    {
+                        "code": "200",
+                        "result": {
+                            "accessToken": "refreshed-open-token",
+                            "refreshToken": "refreshed-refresh-token",
+                            "expiresIn": 600,
+                        },
+                    },
+                    {"code": "0", "data": [{"Code": "01"}]},
+                ],
+                settings=settings,
+                token_store=token_store,
+            )
+
+            result = client.call_tplus_api(
+                "/tplus/api/v2/warehouse/Query",
+                body={"param": {"Code": "01"}},
+                account_alias="company-a",
+            )
+
+            self.assertEqual(result, {"code": "0", "data": [{"Code": "01"}]})
+            self.assertEqual(
+                transport.calls[0]["headers"]["openToken"],
+                "expired-open-token",
+            )
+            self.assertEqual(transport.calls[1]["url"], "https://openapi.chanjet.com/auth/token")
+            self.assertEqual(
+                transport.calls[2]["headers"]["openToken"],
+                "refreshed-open-token",
+            )
+
+    def test_call_api_does_not_retry_when_success_data_mentions_token_text(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            token_store = TokenStore(Path(tmp_dir) / "tokens.json")
+            token_store.save_token_response(
+                "company-a",
+                {
+                    "access_token": "open-token-a",
+                    "refresh_token": "refresh-token-a",
+                },
+                make_active=True,
+            )
+            settings = ChanjetSettings(app_key="app-key", app_secret="app-secret")
+            client, transport = self.make_client(
+                [
+                    {
+                        "code": "0",
+                        "data": {
+                            "note": "the phrase openToken expired is only business data"
+                        },
+                    }
+                ],
+                settings=settings,
+                token_store=token_store,
+            )
+
+            result = client.call_tplus_api("/tplus/api/v2/warehouse/Query")
+
+            self.assertEqual(
+                result,
+                {
+                    "code": "0",
+                    "data": {
+                        "note": "the phrase openToken expired is only business data"
+                    },
+                },
+            )
+            self.assertEqual(len(transport.calls), 1)

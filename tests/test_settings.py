@@ -17,6 +17,8 @@ class SettingsTests(unittest.TestCase):
                         "CHANJET_APP_SECRET=app-secret",
                         "CHANJET_OPEN_TOKEN=open-token",
                         "CHANJET_REFRESH_TOKEN=refresh-token",
+                        "CHANJET_ACTIVE_ACCOUNT=company-a",
+                        "CHANJET_TOKEN_STORE_PATH=/tmp/chanjet-tokens.json",
                     ]
                 ),
                 encoding="utf-8",
@@ -28,6 +30,8 @@ class SettingsTests(unittest.TestCase):
         self.assertEqual(settings.app_secret, "app-secret")
         self.assertEqual(settings.open_token, "open-token")
         self.assertEqual(settings.refresh_token, "refresh-token")
+        self.assertEqual(settings.active_account, "company-a")
+        self.assertEqual(settings.token_store_path, "/tmp/chanjet-tokens.json")
         self.assertEqual(settings.base_url, "https://openapi.chanjet.com")
         self.assertEqual(
             settings.docs_api_url, "https://openapi.chanjet.com/developer/api"
@@ -70,4 +74,3 @@ class SettingsTests(unittest.TestCase):
 
         with self.assertRaises(ValueError):
             ChanjetSettings(app_key="app-key").tplus_headers()
-

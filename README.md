@@ -15,6 +15,7 @@
 - 通用调用任意 YDZ/Finance `/accounting/document/...` 业务接口，自动注入 `appKey`、`appSecret`、`openToken`。
 - 通用调用任意 HKJ/Accounting `/accounting/document/...` 业务接口，自动注入 `appKey`、`appSecret`、`openToken`。
 - 生成 OAuth 授权链接、授权码换 token、刷新 token。
+- 支持多账号 OAuth 授权管理，按账号别名保存 token，并在调用业务接口时自动刷新过期 token。
 
 ## 安装
 
@@ -36,11 +37,38 @@ cp .env.example .env
 ```dotenv
 CHANJET_APP_KEY=your_app_key
 CHANJET_APP_SECRET=your_app_secret
-CHANJET_OPEN_TOKEN=your_open_token
-CHANJET_REFRESH_TOKEN=your_refresh_token
+CHANJET_ACTIVE_ACCOUNT=company-a
+CHANJET_TOKEN_STORE_PATH=.chanjet_tokens.json
 ```
 
-`CHANJET_OPEN_TOKEN` 是调用 T+Cloud、HYC/ZPlus、YDZ/Finance 或 HKJ/Accounting 业务接口时请求头里的 `openToken`。如果只使用文档查询工具，可以暂时不配置业务接口凭据。
+`CHANJET_APP_KEY` 和 `CHANJET_APP_SECRET` 是应用级凭据。账号级 `openToken` / `refreshToken` 推荐通过 OAuth setup 自动写入本地 `.chanjet_tokens.json`，该文件已加入 `.gitignore`。
+
+兼容旧用法：仍可在 `.env` 中配置 `CHANJET_OPEN_TOKEN` 和 `CHANJET_REFRESH_TOKEN` 作为单账号 fallback。如果只使用文档查询工具，可以暂时不配置业务接口凭据。
+
+## 首次 OAuth 授权
+
+1. 调用 `get_auth_url` 获取授权链接：
+
+```json
+{
+  "redirect_uri": "https://example.com/oauth/callback",
+  "state": "optional-state"
+}
+```
+
+2. 在浏览器打开授权链接，完成畅捷通账号授权。
+3. 从回调地址里取得 `code`。
+4. 调用 `oauth_complete_setup` 保存该账号 token：
+
+```json
+{
+  "code": "temporary_authorization_code",
+  "redirect_uri": "https://example.com/oauth/callback",
+  "account_alias": "company-a"
+}
+```
+
+`account_alias` 只能使用字母、数字、点、下划线和连字符，例如 `company-a`、`client_001`。第一次保存账号时会自动设为 active account。后续调用业务接口时会自动读取该账号 token；如果 token 缺失、过期或接口返回 token 失效，服务会使用 refresh token 自动刷新一次并重试。
 
 ## 运行
 
@@ -74,8 +102,8 @@ CHANJET_REFRESH_TOKEN=your_refresh_token
       "env": {
         "CHANJET_APP_KEY": "your_app_key",
         "CHANJET_APP_SECRET": "your_app_secret",
-        "CHANJET_OPEN_TOKEN": "your_open_token",
-        "CHANJET_REFRESH_TOKEN": "your_refresh_token"
+        "CHANJET_ACTIVE_ACCOUNT": "company-a",
+        "CHANJET_TOKEN_STORE_PATH": ".chanjet_tokens.json"
       }
     }
   }
@@ -212,6 +240,7 @@ CHANJET_REFRESH_TOKEN=your_refresh_token
 {
   "path": "/tplus/api/v2/warehouse/Query",
   "method": "POST",
+  "account_alias": "company-a",
   "body": {
     "param": {
       "Code": "01"
@@ -226,10 +255,12 @@ CHANJET_REFRESH_TOKEN=your_refresh_token
 {
   "appKey": "from CHANJET_APP_KEY",
   "appSecret": "from CHANJET_APP_SECRET",
-  "openToken": "from CHANJET_OPEN_TOKEN",
+  "openToken": "from active or selected account",
   "Content-Type": "application/json"
 }
 ```
+
+如果不传 `account_alias`，服务会使用 `CHANJET_ACTIVE_ACCOUNT` 或 token store 中的 active account。
 
 `call_hyc_api`
 
@@ -239,6 +270,7 @@ CHANJET_REFRESH_TOKEN=your_refresh_token
 {
   "path": "/accounting/openapi/cc/warehouse/list/123456",
   "method": "POST",
+  "account_alias": "company-a",
   "body": {
     "pageSize": 20,
     "pageNo": 1
@@ -256,6 +288,7 @@ CHANJET_REFRESH_TOKEN=your_refresh_token
 {
   "path": "/accounting/document/integration/warehouse/batchUpsertt/123456",
   "method": "POST",
+  "account_alias": "company-a",
   "body": [
     {
       "id": "WH001",
@@ -277,6 +310,7 @@ CHANJET_REFRESH_TOKEN=your_refresh_token
 {
   "path": "/accounting/document/integration/warehouse/batchUpsertt/123456",
   "method": "POST",
+  "account_alias": "company-a",
   "body": [
     {
       "id": "HKJ001",
@@ -309,6 +343,48 @@ CHANJET_REFRESH_TOKEN=your_refresh_token
 {
   "code": "temporary_authorization_code",
   "redirect_uri": "https://example.com/oauth/callback"
+}
+```
+
+`oauth_complete_setup`
+
+参数：
+
+```json
+{
+  "code": "temporary_authorization_code",
+  "redirect_uri": "https://example.com/oauth/callback",
+  "account_alias": "company-a"
+}
+```
+
+返回安全账号摘要，不返回真实 token。
+
+`list_auth_accounts`
+
+返回所有已授权账号的安全摘要。
+
+`get_active_account`
+
+返回当前 active account 的安全摘要。
+
+`set_active_account`
+
+参数：
+
+```json
+{
+  "account_alias": "company-a"
+}
+```
+
+`delete_auth_account`
+
+参数：
+
+```json
+{
+  "account_alias": "company-a"
 }
 ```
 
