@@ -97,18 +97,20 @@ CHANJET_TOKEN_STORE_PATH=.chanjet_tokens.json
 {
   "mcpServers": {
     "chanjet-mcp": {
-      "command": "/Users/sun/Documents/Cursor/SP/.venv/bin/chanjet-mcp",
-      "cwd": "/Users/sun/Documents/Cursor/SP",
+      "command": "/Users/sun/Documents/Cursor/SP/.venv/bin/python",
+      "args": ["-m", "chanjet_tcloud_mcp"],
       "env": {
         "CHANJET_APP_KEY": "your_app_key",
         "CHANJET_APP_SECRET": "your_app_secret",
         "CHANJET_ACTIVE_ACCOUNT": "company-a",
-        "CHANJET_TOKEN_STORE_PATH": ".chanjet_tokens.json"
+        "CHANJET_TOKEN_STORE_PATH": "/Users/sun/Documents/Cursor/SP/.chanjet_tokens.json"
       }
     }
   }
 }
 ```
+
+如果客户端支持 `cwd`，也可以把 `command` 改为 `/Users/sun/Documents/Cursor/SP/.venv/bin/chanjet-mcp` 并设置 `cwd` 为项目目录；如果提示 `mcpServers.chanjet-mcp: Invalid input`，通常说明该客户端不接受 `cwd` 字段，使用上面的兼容写法。
 
 ## 工具列表
 
