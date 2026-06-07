@@ -19,6 +19,7 @@ class ChanjetSettings:
     open_token: str | None = None
     refresh_token: str | None = None
     active_account: str | None = None
+    redirect_uri: str | None = None
     token_store_path: str = DEFAULT_TOKEN_STORE_PATH
     base_url: str = DEFAULT_BASE_URL
     docs_api_url: str = DEFAULT_DOCS_API_URL
@@ -48,6 +49,7 @@ class ChanjetSettings:
             open_token=get("CHANJET_OPEN_TOKEN"),
             refresh_token=get("CHANJET_REFRESH_TOKEN"),
             active_account=get("CHANJET_ACTIVE_ACCOUNT"),
+            redirect_uri=get("CHANJET_REDIRECT_URI"),
             token_store_path=(
                 get("CHANJET_TOKEN_STORE_PATH", DEFAULT_TOKEN_STORE_PATH)
                 or DEFAULT_TOKEN_STORE_PATH

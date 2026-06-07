@@ -283,13 +283,15 @@ class ChanjetTCloudClient:
     def oauth_complete_setup(
         self,
         code: str,
-        redirect_uri: str,
-        account_alias: str,
+        redirect_uri: str | None = None,
+        account_alias: str | None = None,
         *,
         timestamp: str | None = None,
         nonce: str | None = None,
         now: int | float | None = None,
     ) -> dict[str, Any]:
+        if not account_alias:
+            raise ValueError("account_alias is required")
         token_response = self.exchange_token(
             code=code,
             redirect_uri=redirect_uri,
@@ -328,7 +330,7 @@ class ChanjetTCloudClient:
 
     def get_auth_url(
         self,
-        redirect_uri: str,
+        redirect_uri: str | None = None,
         state: str | None = None,
         *,
         timestamp: str | None = None,
@@ -336,12 +338,11 @@ class ChanjetTCloudClient:
     ) -> str:
         if not self.settings.app_key:
             raise ValueError("CHANJET_APP_KEY is required")
-        if not redirect_uri:
-            raise ValueError("redirect_uri is required")
+        resolved_redirect_uri = self._resolve_redirect_uri(redirect_uri)
 
         params = {
             "app_key": self.settings.app_key,
-            "redirect_uri": redirect_uri,
+            "redirect_uri": resolved_redirect_uri,
             "response_type": "code",
             "state": state or uuid.uuid4().hex,
             "timestamp": timestamp or str(int(time.time())),
@@ -353,27 +354,32 @@ class ChanjetTCloudClient:
     def exchange_token(
         self,
         code: str,
-        redirect_uri: str,
+        redirect_uri: str | None = None,
         *,
         timestamp: str | None = None,
         nonce: str | None = None,
     ) -> dict[str, Any]:
         if not code:
             raise ValueError("code is required")
-        if not redirect_uri:
-            raise ValueError("redirect_uri is required")
+        resolved_redirect_uri = self._resolve_redirect_uri(redirect_uri)
         params = self._token_params(
             grant_type="authorization_code",
             timestamp=timestamp,
             nonce=nonce,
         )
         params["code"] = code
-        params["redirect_uri"] = redirect_uri
+        params["redirect_uri"] = resolved_redirect_uri
         params["sign"] = self._signature(params)
         response = self.transport.request(
             "GET", f"{self.settings.base_url}/auth/token", params=params
         )
         return self._normalize_token_response(response)
+
+    def _resolve_redirect_uri(self, redirect_uri: str | None) -> str:
+        resolved_redirect_uri = redirect_uri or self.settings.redirect_uri
+        if not resolved_redirect_uri:
+            raise ValueError("redirect_uri is required")
+        return resolved_redirect_uri
 
     def refresh_token(
         self,

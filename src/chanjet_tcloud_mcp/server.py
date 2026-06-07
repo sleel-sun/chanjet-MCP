@@ -166,13 +166,13 @@ def call_hkj_api(
 
 
 @mcp.tool()
-def get_auth_url(redirect_uri: str, state: str | None = None) -> str:
+def get_auth_url(redirect_uri: str | None = None, state: str | None = None) -> str:
     """Build a Chanjet OAuth authorization URL."""
     return client.get_auth_url(redirect_uri=redirect_uri, state=state)
 
 
 @mcp.tool()
-def exchange_token(code: str, redirect_uri: str) -> dict[str, Any]:
+def exchange_token(code: str, redirect_uri: str | None = None) -> dict[str, Any]:
     """Exchange a temporary authorization code for token data."""
     return client.exchange_token(code=code, redirect_uri=redirect_uri)
 
@@ -180,14 +180,14 @@ def exchange_token(code: str, redirect_uri: str) -> dict[str, Any]:
 @mcp.tool()
 def oauth_complete_setup(
     code: str,
-    redirect_uri: str,
     account_alias: str,
+    redirect_uri: str | None = None,
 ) -> dict[str, Any]:
     """Exchange an OAuth code and store tokens under a named Chanjet account."""
     return client.oauth_complete_setup(
         code=code,
-        redirect_uri=redirect_uri,
         account_alias=account_alias,
+        redirect_uri=redirect_uri,
     )
 
 

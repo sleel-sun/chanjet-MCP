@@ -564,6 +564,43 @@ class ClientTests(unittest.TestCase):
         self.assertIn("nonce=nonce-1", url)
         self.assertIn("sign=", url)
 
+    def test_get_auth_url_uses_configured_redirect_uri_when_omitted(self):
+        settings = ChanjetSettings(
+            app_key="app-key",
+            redirect_uri="https://client-a.example.com/oauth/callback",
+        )
+        client, _transport = self.make_client([], settings=settings)
+
+        url = client.get_auth_url(
+            state="state-1",
+            timestamp="1700000000",
+            nonce="nonce-1",
+        )
+
+        self.assertIn(
+            "redirect_uri=https%3A%2F%2Fclient-a.example.com%2Foauth%2Fcallback",
+            url,
+        )
+
+    def test_get_auth_url_prefers_explicit_redirect_uri(self):
+        settings = ChanjetSettings(
+            app_key="app-key",
+            redirect_uri="https://client-a.example.com/oauth/callback",
+        )
+        client, _transport = self.make_client([], settings=settings)
+
+        url = client.get_auth_url(
+            redirect_uri="https://override.example.com/oauth/callback",
+            state="state-1",
+            timestamp="1700000000",
+            nonce="nonce-1",
+        )
+
+        self.assertIn(
+            "redirect_uri=https%3A%2F%2Foverride.example.com%2Foauth%2Fcallback",
+            url,
+        )
+
     def test_exchange_token_normalizes_access_token_response(self):
         client, transport = self.make_client(
             [
@@ -605,6 +642,36 @@ class ClientTests(unittest.TestCase):
         self.assertEqual(transport.calls[0]["params"]["code"], "auth-code")
         self.assertIn("sign", transport.calls[0]["params"])
 
+    def test_exchange_token_uses_configured_redirect_uri_when_omitted(self):
+        settings = ChanjetSettings(
+            app_key="app-key",
+            app_secret="app-secret",
+            redirect_uri="https://client-a.example.com/oauth/callback",
+        )
+        client, transport = self.make_client(
+            [
+                {
+                    "code": "200",
+                    "result": {
+                        "accessToken": "new-open-token",
+                        "refreshToken": "new-refresh-token",
+                    },
+                }
+            ],
+            settings=settings,
+        )
+
+        client.exchange_token(
+            code="auth-code",
+            timestamp="1700000300",
+            nonce="nonce-2",
+        )
+
+        self.assertEqual(
+            transport.calls[0]["params"]["redirect_uri"],
+            "https://client-a.example.com/oauth/callback",
+        )
+
     def test_oauth_complete_setup_stores_account_without_returning_token_values(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
             token_store = TokenStore(Path(tmp_dir) / "tokens.json")
@@ -644,6 +711,42 @@ class ClientTests(unittest.TestCase):
             self.assertEqual(
                 token_store.get_account("company-a")["open_token"],
                 "stored-open-token",
+            )
+
+    def test_oauth_complete_setup_uses_configured_redirect_uri_when_omitted(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            token_store = TokenStore(Path(tmp_dir) / "tokens.json")
+            settings = ChanjetSettings(
+                app_key="app-key",
+                app_secret="app-secret",
+                redirect_uri="https://client-a.example.com/oauth/callback",
+            )
+            client, transport = self.make_client(
+                [
+                    {
+                        "code": "200",
+                        "result": {
+                            "accessToken": "stored-open-token",
+                            "refreshToken": "stored-refresh-token",
+                        },
+                    }
+                ],
+                settings=settings,
+                token_store=token_store,
+            )
+
+            summary = client.oauth_complete_setup(
+                code="auth-code",
+                account_alias="company-a",
+                timestamp="1700000300",
+                nonce="nonce-3",
+                now=1_000,
+            )
+
+            self.assertEqual(summary["account_alias"], "company-a")
+            self.assertEqual(
+                transport.calls[0]["params"]["redirect_uri"],
+                "https://client-a.example.com/oauth/callback",
             )
             self.assertEqual(transport.calls[0]["params"]["grant_type"], "authorization_code")
 
