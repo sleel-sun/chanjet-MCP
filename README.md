@@ -39,6 +39,7 @@ CHANJET_APP_KEY=your_app_key
 CHANJET_APP_SECRET=your_app_secret
 CHANJET_ACTIVE_ACCOUNT=company-a
 CHANJET_TOKEN_STORE_PATH=.chanjet_tokens.json
+CHANJET_REDIRECT_URI=https://example.com/oauth/callback
 ```
 
 `CHANJET_APP_KEY` 和 `CHANJET_APP_SECRET` 是应用级凭据。账号级 `openToken` / `refreshToken` 推荐通过 OAuth setup 自动写入本地 `.chanjet_tokens.json`，该文件已加入 `.gitignore`。
@@ -47,7 +48,9 @@ CHANJET_TOKEN_STORE_PATH=.chanjet_tokens.json
 
 ## 首次 OAuth 授权
 
-1. 调用 `get_auth_url` 获取授权链接：
+`redirect_uri` 可以在每次调用工具时显式传入，也可以通过 `CHANJET_REDIRECT_URI` 设置默认值。显式参数优先于环境变量。
+
+1. 调用 `get_auth_url` 获取授权链接。如果已配置 `CHANJET_REDIRECT_URI`，可以省略 `redirect_uri`：
 
 ```json
 {
@@ -56,9 +59,9 @@ CHANJET_TOKEN_STORE_PATH=.chanjet_tokens.json
 }
 ```
 
-2. 在浏览器打开授权链接，完成畅捷通账号授权。
+2. 在浏览器打开授权链接，完成畅捷通账号授权。该回调域名必须先在畅捷通开放平台完成可信域名验证。
 3. 从回调地址里取得 `code`。
-4. 调用 `oauth_complete_setup` 保存该账号 token：
+4. 调用 `oauth_complete_setup` 保存该账号 token。如果已配置 `CHANJET_REDIRECT_URI`，这里也可以省略 `redirect_uri`，但必须和生成授权链接时使用的回调地址一致：
 
 ```json
 {
@@ -69,6 +72,32 @@ CHANJET_TOKEN_STORE_PATH=.chanjet_tokens.json
 ```
 
 `account_alias` 只能使用字母、数字、点、下划线和连字符，例如 `company-a`、`client_001`。第一次保存账号时会自动设为 active account。后续调用业务接口时会自动读取该账号 token；如果 token 缺失、过期或接口返回 token 失效，服务会使用 refresh token 自动刷新一次并重试。
+
+## 多客户端授权
+
+不同 MCP 客户端可以使用不同的 `redirect_uri` 和 token 文件。每个 `redirect_uri` 所属域名都需要在畅捷通开放平台完成可信域名验证：下载 `CHANJET_CHECK.txt`，上传到域名根目录，例如 `https://example.com/CHANJET_CHECK.txt`，确认公网可访问后添加可信域名。
+
+共用授权时，多个客户端配置同一个 `CHANJET_REDIRECT_URI` 和同一个 `CHANJET_TOKEN_STORE_PATH`。隔离授权时，为每个客户端配置不同的 `CHANJET_REDIRECT_URI`、`CHANJET_TOKEN_STORE_PATH` 和 `CHANJET_ACTIVE_ACCOUNT`。
+
+Cursor 示例：
+
+```json
+{
+  "CHANJET_ACTIVE_ACCOUNT": "cursor-company",
+  "CHANJET_TOKEN_STORE_PATH": "/Users/sun/Documents/Cursor/SP/.chanjet_tokens.cursor.json",
+  "CHANJET_REDIRECT_URI": "https://cursor.example.com/oauth/callback"
+}
+```
+
+Claude 示例：
+
+```json
+{
+  "CHANJET_ACTIVE_ACCOUNT": "claude-company",
+  "CHANJET_TOKEN_STORE_PATH": "/Users/sun/Documents/Cursor/SP/.chanjet_tokens.claude.json",
+  "CHANJET_REDIRECT_URI": "https://claude.example.com/oauth/callback"
+}
+```
 
 ## 运行
 
@@ -103,7 +132,8 @@ CHANJET_TOKEN_STORE_PATH=.chanjet_tokens.json
         "CHANJET_APP_KEY": "your_app_key",
         "CHANJET_APP_SECRET": "your_app_secret",
         "CHANJET_ACTIVE_ACCOUNT": "company-a",
-        "CHANJET_TOKEN_STORE_PATH": "/Users/sun/Documents/Cursor/SP/.chanjet_tokens.json"
+        "CHANJET_TOKEN_STORE_PATH": "/Users/sun/Documents/Cursor/SP/.chanjet_tokens.json",
+        "CHANJET_REDIRECT_URI": "https://example.com/oauth/callback"
       }
     }
   }
@@ -337,6 +367,8 @@ CHANJET_TOKEN_STORE_PATH=.chanjet_tokens.json
 }
 ```
 
+如果已配置 `CHANJET_REDIRECT_URI`，`redirect_uri` 可省略。
+
 `exchange_token`
 
 参数：
@@ -347,6 +379,8 @@ CHANJET_TOKEN_STORE_PATH=.chanjet_tokens.json
   "redirect_uri": "https://example.com/oauth/callback"
 }
 ```
+
+如果已配置 `CHANJET_REDIRECT_URI`，`redirect_uri` 可省略。
 
 `oauth_complete_setup`
 
@@ -359,6 +393,8 @@ CHANJET_TOKEN_STORE_PATH=.chanjet_tokens.json
   "account_alias": "company-a"
 }
 ```
+
+如果已配置 `CHANJET_REDIRECT_URI`，`redirect_uri` 可省略。
 
 返回安全账号摘要，不返回真实 token。
 

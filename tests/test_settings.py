@@ -19,6 +19,7 @@ class SettingsTests(unittest.TestCase):
                         "CHANJET_REFRESH_TOKEN=refresh-token",
                         "CHANJET_ACTIVE_ACCOUNT=company-a",
                         "CHANJET_TOKEN_STORE_PATH=/tmp/chanjet-tokens.json",
+                        "CHANJET_REDIRECT_URI=https://client-a.example.com/oauth/callback",
                     ]
                 ),
                 encoding="utf-8",
@@ -32,6 +33,9 @@ class SettingsTests(unittest.TestCase):
         self.assertEqual(settings.refresh_token, "refresh-token")
         self.assertEqual(settings.active_account, "company-a")
         self.assertEqual(settings.token_store_path, "/tmp/chanjet-tokens.json")
+        self.assertEqual(
+            settings.redirect_uri, "https://client-a.example.com/oauth/callback"
+        )
         self.assertEqual(settings.base_url, "https://openapi.chanjet.com")
         self.assertEqual(
             settings.docs_api_url, "https://openapi.chanjet.com/developer/api"
