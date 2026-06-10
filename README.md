@@ -294,6 +294,42 @@ Claude 示例：
 
 如果不传 `account_alias`，服务会使用 `CHANJET_ACTIVE_ACCOUNT` 或 token store 中的 active account。
 
+`query_tplus_voucher_list`
+
+查询 T+ 单据列表的专用工具。服务会先调用官方栏目辅助接口
+`/tplus/api/v2/VoucherAPIService/GetColumnSetByBizCode` 获取当前单据编码的全部列表显示字段，再把 `display_fields` 自动匹配成真实字段并注入到列表查询请求中。
+
+参数示例：
+
+```json
+{
+  "biz_code": "SA03",
+  "path": "/tplus/api/v2/saleDelivery/Query",
+  "method": "POST",
+  "account_alias": "company-a",
+  "display_fields": ["单据编号", "客户", "金额"],
+  "body": {
+    "param": {
+      "pageIndex": 1,
+      "pageSize": 20
+    }
+  }
+}
+```
+
+返回值包含实际列表查询响应、全部可用显示字段、已匹配字段和未匹配字段：
+
+```json
+{
+  "data": {},
+  "display_fields": [],
+  "matched_display_fields": [],
+  "unmatched_display_fields": []
+}
+```
+
+如果请求体中已存在 `selectFields`、`fields`、`columns` 或 `select`，服务不会覆盖调用方已有的字段选择。
+
 `call_hyc_api`
 
 参数示例：
