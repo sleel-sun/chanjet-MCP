@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import hashlib
 import time
 import uuid
@@ -16,6 +17,10 @@ TCLOUD_PRODUCT_CODE = "tcloud"
 HYC_PRODUCT_CODE = "zplus"
 YDZ_PRODUCT_CODE = "finance"
 HKJ_PRODUCT_CODE = "accounting"
+TPLUS_VOUCHER_COLUMN_SET_PATH = (
+    "/tplus/api/v2/VoucherAPIService/GetColumnSetByBizCode"
+)
+VOUCHER_FIELD_SELECTION_KEYS = {"selectfields", "fields", "columns", "select"}
 
 
 class ChanjetApiError(RuntimeError):
@@ -222,6 +227,55 @@ class ChanjetTCloudClient:
             headers=headers,
             account_alias=account_alias,
         )
+
+    def query_tplus_voucher_list(
+        self,
+        *,
+        biz_code: str,
+        path: str,
+        method: str = "POST",
+        body: Any = None,
+        display_fields: list[str] | None = None,
+        query: dict[str, Any] | None = None,
+        headers: dict[str, str] | None = None,
+        account_alias: str | None = None,
+    ) -> dict[str, Any]:
+        if not biz_code:
+            raise ValueError("biz_code is required")
+        if not path:
+            raise ValueError("path is required")
+
+        column_response = self.call_tplus_api(
+            path=TPLUS_VOUCHER_COLUMN_SET_PATH,
+            method="POST",
+            body=self._voucher_column_request_body(biz_code),
+            headers=headers,
+            account_alias=account_alias,
+        )
+        available_fields = self._extract_voucher_display_fields(column_response)
+        matched_fields, unmatched_fields = self._match_display_fields(
+            display_fields or [],
+            available_fields,
+        )
+        list_body = self._inject_display_fields(
+            body,
+            [field["field"] for field in matched_fields],
+        )
+        list_response = self.call_tplus_api(
+            path=path,
+            method=method,
+            body=list_body,
+            query=query,
+            headers=headers,
+            account_alias=account_alias,
+        )
+
+        return {
+            "data": list_response,
+            "display_fields": available_fields,
+            "matched_display_fields": matched_fields,
+            "unmatched_display_fields": unmatched_fields,
+        }
 
     def call_hyc_api(
         self,
@@ -554,6 +608,208 @@ class ChanjetTCloudClient:
             return False
         normalized_code = str(code).casefold()
         return normalized_code not in {"0", "200", "openapi.e0000"}
+
+    def _voucher_column_request_body(self, biz_code: str) -> dict[str, Any]:
+        return {
+            "bizCode": biz_code,
+            "apiParam": {"dataSource": "openapi"},
+        }
+
+    def _extract_voucher_display_fields(self, response: Any) -> list[dict[str, Any]]:
+        display_fields: list[dict[str, Any]] = []
+        seen: set[tuple[str, str]] = set()
+
+        def add_candidate(value: Any) -> None:
+            normalized = self._normalize_display_field(value)
+            if normalized is None:
+                return
+            dedupe_key = (
+                self._normalize_match_value(normalized["field"]),
+                self._normalize_match_value(normalized["label"]),
+            )
+            if dedupe_key in seen:
+                return
+            seen.add(dedupe_key)
+            display_fields.append(normalized)
+
+        def collect(value: Any, *, list_item: bool = False) -> None:
+            if isinstance(value, list):
+                for item in value:
+                    collect(item, list_item=True)
+                return
+            if not isinstance(value, dict):
+                return
+
+            if list_item:
+                add_candidate(value)
+
+            for item in value.values():
+                if isinstance(item, (dict, list)):
+                    collect(item)
+
+        collect(response)
+        return display_fields
+
+    def _normalize_display_field(self, value: Any) -> dict[str, Any] | None:
+        if not isinstance(value, dict):
+            return None
+
+        field = self._first_mapping_value(
+            value,
+            (
+                "field",
+                "fieldName",
+                "fieldCode",
+                "columnName",
+                "propertyName",
+                "dataIndex",
+                "code",
+                "key",
+                "id",
+            ),
+        )
+        label = self._first_mapping_value(
+            value,
+            (
+                "caption",
+                "title",
+                "label",
+                "displayName",
+                "fieldCaption",
+                "text",
+                "header",
+                "name",
+            ),
+        )
+        if field is None and label is None:
+            return None
+
+        field_text = str(field if field is not None else label).strip()
+        label_text = str(label if label is not None else field).strip()
+        if not field_text and not label_text:
+            return None
+
+        normalized: dict[str, Any] = {
+            "field": field_text,
+            "label": label_text,
+            "raw": value,
+        }
+        for output_key, source_keys in (
+            ("name", ("name",)),
+            ("title", ("title",)),
+            ("caption", ("caption",)),
+            ("code", ("code",)),
+            ("key", ("key",)),
+        ):
+            source_value = self._first_mapping_value(value, source_keys)
+            if source_value is not None:
+                normalized[output_key] = str(source_value).strip()
+        return normalized
+
+    def _match_display_fields(
+        self,
+        requested_fields: list[str],
+        available_fields: list[dict[str, Any]],
+    ) -> tuple[list[dict[str, str]], list[str]]:
+        matched: list[dict[str, str]] = []
+        unmatched: list[str] = []
+
+        for requested in requested_fields:
+            requested_text = str(requested).strip()
+            if not requested_text:
+                continue
+            match = self._find_display_field_match(requested_text, available_fields)
+            if match is None:
+                unmatched.append(requested_text)
+                continue
+            matched.append(
+                {
+                    "requested": requested_text,
+                    "field": str(match["field"]),
+                    "label": str(match["label"]),
+                }
+            )
+
+        return matched, unmatched
+
+    def _find_display_field_match(
+        self,
+        requested: str,
+        available_fields: list[dict[str, Any]],
+    ) -> dict[str, Any] | None:
+        requested_key = self._normalize_match_value(requested)
+        if not requested_key:
+            return None
+
+        field_values = [
+            (field, self._display_field_match_values(field))
+            for field in available_fields
+        ]
+        for field, values in field_values:
+            if requested_key in values:
+                return field
+        for field, values in field_values:
+            if any(requested_key in value or value in requested_key for value in values):
+                return field
+        return None
+
+    def _display_field_match_values(self, field: dict[str, Any]) -> set[str]:
+        values: set[str] = set()
+        for key in ("field", "label", "name", "title", "caption", "code", "key"):
+            value = field.get(key)
+            if value is None:
+                continue
+            normalized = self._normalize_match_value(value)
+            if normalized:
+                values.add(normalized)
+        return values
+
+    def _inject_display_fields(self, body: Any, fields: list[str]) -> Any:
+        copied_body = copy.deepcopy(body)
+        if not fields:
+            return copied_body
+
+        if copied_body is None:
+            copied_body = {}
+        if not isinstance(copied_body, dict):
+            return copied_body
+        if self._has_existing_field_selection(copied_body):
+            return copied_body
+
+        param = copied_body.get("param")
+        if param is None:
+            param = {}
+            copied_body["param"] = param
+        if not isinstance(param, dict):
+            return copied_body
+        param["selectFields"] = fields
+        return copied_body
+
+    def _has_existing_field_selection(self, value: Any) -> bool:
+        if isinstance(value, dict):
+            for key, item in value.items():
+                if str(key).casefold() in VOUCHER_FIELD_SELECTION_KEYS:
+                    return True
+                if self._has_existing_field_selection(item):
+                    return True
+        elif isinstance(value, list):
+            return any(self._has_existing_field_selection(item) for item in value)
+        return False
+
+    def _first_mapping_value(
+        self,
+        value: dict[str, Any],
+        keys: tuple[str, ...],
+    ) -> Any:
+        normalized_keys = {str(key).casefold(): item for key, item in value.items()}
+        for key in keys:
+            item = normalized_keys.get(key.casefold())
+            if item is not None and str(item).strip():
+                return item
+        return None
+
+    def _normalize_match_value(self, value: Any) -> str:
+        return "".join(char for char in str(value).casefold() if char.isalnum())
 
     def _docs_url(self, *parts: str) -> str:
         encoded_parts = [quote(str(part), safe="") for part in parts]

@@ -544,6 +544,90 @@ class ClientTests(unittest.TestCase):
         self.assertEqual(transport.calls[0]["headers"]["openToken"], "open-token")
         self.assertEqual(transport.calls[0]["json_body"], {"param": {"Code": "01"}})
 
+    def test_query_tplus_voucher_list_fetches_and_matches_display_fields(self):
+        client, transport = self.make_client(
+            [
+                {
+                    "code": "0",
+                    "data": {
+                        "columns": [
+                            {"FieldName": "Code", "Caption": "单据编号"},
+                            {"FieldName": "CustomerName", "Caption": "客户"},
+                            {"FieldName": "Amount", "Caption": "金额"},
+                        ]
+                    },
+                },
+                {"code": "0", "data": [{"Code": "SA-001", "CustomerName": "客户A"}]},
+            ]
+        )
+
+        result = client.query_tplus_voucher_list(
+            biz_code="SA03",
+            path="/tplus/api/v2/saleDelivery/Query",
+            body={"param": {"pageIndex": 1}},
+            display_fields=["单据编号", "客户", "不存在字段"],
+        )
+
+        self.assertEqual(len(transport.calls), 2)
+        self.assertEqual(
+            transport.calls[0]["url"],
+            "https://openapi.chanjet.com/tplus/api/v2/VoucherAPIService/GetColumnSetByBizCode",
+        )
+        self.assertEqual(
+            transport.calls[0]["json_body"],
+            {"bizCode": "SA03", "apiParam": {"dataSource": "openapi"}},
+        )
+        self.assertEqual(
+            transport.calls[1]["url"],
+            "https://openapi.chanjet.com/tplus/api/v2/saleDelivery/Query",
+        )
+        self.assertEqual(
+            transport.calls[1]["json_body"],
+            {"param": {"pageIndex": 1, "selectFields": ["Code", "CustomerName"]}},
+        )
+        self.assertEqual(
+            result["data"],
+            {"code": "0", "data": [{"Code": "SA-001", "CustomerName": "客户A"}]},
+        )
+        self.assertEqual(
+            result["matched_display_fields"],
+            [
+                {"requested": "单据编号", "field": "Code", "label": "单据编号"},
+                {"requested": "客户", "field": "CustomerName", "label": "客户"},
+            ],
+        )
+        self.assertEqual(result["unmatched_display_fields"], ["不存在字段"])
+        self.assertEqual(
+            [field["field"] for field in result["display_fields"]],
+            ["Code", "CustomerName", "Amount"],
+        )
+
+    def test_query_tplus_voucher_list_preserves_existing_field_selection(self):
+        client, transport = self.make_client(
+            [
+                {
+                    "code": "0",
+                    "data": [
+                        {"field": "Code", "title": "单据编号"},
+                        {"field": "CustomerName", "title": "客户"},
+                    ],
+                },
+                {"code": "0", "data": []},
+            ]
+        )
+
+        client.query_tplus_voucher_list(
+            biz_code="SA03",
+            path="/tplus/api/v2/saleDelivery/Query",
+            body={"param": {"selectFields": ["ExistingField"]}},
+            display_fields=["单据编号"],
+        )
+
+        self.assertEqual(
+            transport.calls[1]["json_body"],
+            {"param": {"selectFields": ["ExistingField"]}},
+        )
+
     def test_get_auth_url_contains_oauth_parameters_and_signature(self):
         settings = ChanjetSettings(app_key="app-key")
         client, _transport = self.make_client([], settings=settings)

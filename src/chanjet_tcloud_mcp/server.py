@@ -106,6 +106,30 @@ def call_tplus_api(
 
 
 @mcp.tool()
+def query_tplus_voucher_list(
+    biz_code: str,
+    path: str,
+    method: str = "POST",
+    body: dict[str, Any] | list[Any] | None = None,
+    display_fields: list[str] | None = None,
+    query: dict[str, Any] | None = None,
+    headers: dict[str, str] | None = None,
+    account_alias: str | None = None,
+) -> dict[str, Any]:
+    """Query a T+ voucher list after preloading and matching display fields."""
+    return client.query_tplus_voucher_list(
+        biz_code=biz_code,
+        path=path,
+        method=method,
+        body=body,
+        display_fields=display_fields,
+        query=query,
+        headers=headers,
+        account_alias=account_alias,
+    )
+
+
+@mcp.tool()
 def call_hyc_api(
     path: str,
     method: str = "POST",
