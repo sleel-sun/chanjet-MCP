@@ -1,17 +1,21 @@
 # Chanjet MCP Server
 
-独立 Python MCP 服务，用于把畅捷通 T+Cloud、好业财（HYC/ZPlus）、易代账（YDZ/Finance）和好会计（HKJ/Accounting）OpenAPI 文档与业务接口暴露给 MCP 客户端。
+独立 Python MCP 服务，用于把畅捷通 T+Cloud、好业财（HYC/ZPlus）、好生意（HSY）、易代账（YDZ/Finance）和好会计（HKJ/Accounting）OpenAPI 文档与业务接口暴露给 MCP 客户端。
 
 ## 功能
 
 - 查询 T+Cloud 官方 API 文档模块树。
 - 查询好业财 HYC/ZPlus 官方 API 文档模块树。
+- 查询好生意 HSY 官方 API 文档模块树。
 - 查询易代账 YDZ/Finance 官方 API 文档模块树。
 - 查询好会计 HKJ/Accounting 官方 API 文档模块树。
 - 按模块编码读取官方接口详情。
-- 按关键词搜索 T+Cloud、HYC/ZPlus、YDZ/Finance 或 HKJ/Accounting 文档模块。
+- 按关键词搜索 T+Cloud、HYC/ZPlus、HSY、YDZ/Finance 或 HKJ/Accounting 文档模块。
+- 诊断 MCP 客户端配置是否具备文档查询、OAuth 和业务接口调用能力。
+- 从官方接口文档生成可直接编辑的 MCP 调用模板。
 - 通用调用任意 `/tplus/api/...` 业务接口，自动注入 `appKey`、`appSecret`、`openToken`。
 - 通用调用任意 HYC/ZPlus `/accounting/openapi/...` 业务接口，自动注入 `appKey`、`appSecret`、`openToken`。
+- 通用调用任意 HSY OpenAPI 业务接口，自动注入 `appKey`、`appSecret`、`openToken`。
 - 通用调用任意 YDZ/Finance `/accounting/document/...` 业务接口，自动注入 `appKey`、`appSecret`、`openToken`。
 - 通用调用任意 HKJ/Accounting `/accounting/document/...` 业务接口，自动注入 `appKey`、`appSecret`、`openToken`。
 - 生成 OAuth 授权链接、授权码换 token、刷新 token。
@@ -116,6 +120,7 @@ Claude 示例：
 ```bash
 .venv/bin/chanjet-tcloud-mcp
 .venv/bin/hyc-mcp
+.venv/bin/hsy-mcp
 .venv/bin/ydz-mcp
 .venv/bin/hkj-mcp
 ```
@@ -144,6 +149,178 @@ Claude 示例：
 
 ## 工具列表
 
+推荐客户端流程：
+
+1. 调用 `diagnose_config` 确认配置和账号状态。
+2. 调用 `search_api_templates` 用中文业务词直接查找可调用模板。
+3. 调用 `call_api_template` 按模板自动路由到对应产品接口。
+
+如果客户端需要更细控制，也可以继续使用旧流程：先调用 `search_*_docs` 找模块，再调用 `get_api_call_template` 生成模板，最后按模板调用 `call_tplus_api`、`call_hyc_api`、`call_hsy_api`、`call_ydz_api` 或 `call_hkj_api`。
+
+`diagnose_config`
+
+返回不含密钥和 token 的安全诊断结果：
+
+```json
+{
+  "ok": true,
+  "data": {
+    "settings": {
+      "has_app_key": true,
+      "has_app_secret": true,
+      "has_redirect_uri": true,
+      "token_store_path": "/path/to/.chanjet_tokens.json"
+    },
+    "accounts": {
+      "active_account": "company-a",
+      "stored_account_count": 1,
+      "active_account_exists": true,
+      "has_active_open_token": true,
+      "has_active_refresh_token": true,
+      "active_token_expired": false
+    },
+    "capabilities": {
+      "documentation_lookup": true,
+      "oauth_url_generation": true,
+      "token_exchange": true,
+      "business_api_calls": true
+    },
+    "issues": []
+  }
+}
+```
+
+如果缺少配置，`issues` 会返回 `missing_app_key`、`missing_app_secret`、`missing_redirect_uri`、`missing_token` 等可读问题和修复建议。
+
+`get_api_call_template`
+
+从官方文档详情里提取接口地址和调用参数模板。`product` 支持 `tplus`/`tcloud`、`hyc`/`zplus`、`hsy`/`haoshengyi`、`ydz`/`finance`、`hkj`/`accounting`。
+
+参数：
+
+```json
+{
+  "product": "tplus",
+  "parent_code": "t+jcda",
+  "module_code": "t+ck",
+  "api_name": "查询"
+}
+```
+
+返回：
+
+```json
+{
+  "ok": true,
+  "data": {
+    "product": {
+      "code": "tcloud",
+      "tool": "call_tplus_api"
+    },
+    "module": {
+      "parent_code": "t+jcda",
+      "module_code": "t+ck"
+    },
+    "templates": [
+      {
+        "api_name": "仓库查询",
+        "path": "/tplus/api/v2/warehouse/Query",
+        "method": "POST",
+        "tool": "call_tplus_api",
+        "arguments": {
+          "path": "/tplus/api/v2/warehouse/Query",
+          "method": "POST",
+          "body": {},
+          "query": {},
+          "headers": {},
+          "account_alias": null
+        }
+      }
+    ]
+  }
+}
+```
+
+`search_api_templates`
+
+按业务关键词搜索官方文档，并直接返回可编辑调用模板。客户端不需要先判断应该调用哪个 `search_*_docs`。
+
+参数：
+
+```json
+{
+  "query": "仓库",
+  "product": "tplus",
+  "api_name": "查询",
+  "limit": 5
+}
+```
+
+`product` 可省略；省略时会依次搜索 T+Cloud、好业财、好生意、易代账和好会计。返回的每个模板都包含 `product`、`module`、`tool` 和 `arguments`。
+
+`call_api_template`
+
+根据官方文档模板自动选择对应产品调用工具。客户端只需要提供产品、模块编码、可选接口名和业务参数，不需要自己选择 `call_tplus_api` / `call_hyc_api` 等底层工具。
+
+参数：
+
+```json
+{
+  "product": "tplus",
+  "parent_code": "t+jcda",
+  "module_code": "t+ck",
+  "api_name": "查询",
+  "account_alias": "company-a",
+  "body": {
+    "param": {
+      "Code": "01"
+    }
+  }
+}
+```
+
+返回：
+
+```json
+{
+  "ok": true,
+  "data": {
+    "template": {
+      "api_name": "仓库查询",
+      "path": "/tplus/api/v2/warehouse/Query",
+      "tool": "call_tplus_api"
+    },
+    "request": {
+      "path": "/tplus/api/v2/warehouse/Query",
+      "method": "POST",
+      "body": {
+        "param": {
+          "Code": "01"
+        }
+      },
+      "query": {},
+      "headers": {},
+      "account_alias": "company-a"
+    },
+    "data": {}
+  }
+}
+```
+
+`diagnose_config`、`get_api_call_template`、`search_api_templates` 和 `call_api_template` 使用统一错误结构：
+
+```json
+{
+  "ok": false,
+  "error": {
+    "code": "invalid_argument",
+    "message": "Unsupported product: unknown",
+    "hint": "Use one of: tplus, tcloud, hyc, zplus, hsy, haoshengyi, ydz, finance, hkj, accounting.",
+    "trace_id": null
+  }
+}
+```
+
 `list_tcloud_modules`
 
 返回官方 T+Cloud 文档模块树。
@@ -151,6 +328,10 @@ Claude 示例：
 `list_hyc_modules`
 
 返回官方好业财 HYC/ZPlus 文档模块树。
+
+`list_hsy_modules`
+
+返回官方好生意 HSY 文档模块树。
 
 `list_ydz_modules`
 
@@ -185,6 +366,19 @@ Claude 示例：
 ```
 
 返回好业财仓库模块的官方接口详情。
+
+`get_hsy_doc`
+
+参数：
+
+```json
+{
+  "parent_code": "hsyxxdy",
+  "module_code": "hsy_product"
+}
+```
+
+返回好生意模块的官方接口详情。当前官方 `hsy` 产品文档树可能为空；工具会随官方文档更新自动返回新增模块。
 
 `get_ydz_doc`
 
@@ -237,6 +431,19 @@ Claude 示例：
 ```
 
 返回匹配的好业财模块编码、名称和文档路径。
+
+`search_hsy_docs`
+
+参数：
+
+```json
+{
+  "query": "仓库",
+  "limit": 20
+}
+```
+
+返回匹配的好生意模块编码、名称和文档路径。
 
 `search_ydz_docs`
 
@@ -347,6 +554,24 @@ Claude 示例：
 ```
 
 服务会自动注入与 T+Cloud 相同的畅捷通开放平台请求头。
+
+`call_hsy_api`
+
+参数示例：
+
+```json
+{
+  "path": "/accounting/openapi/cc/warehouse/list/123456",
+  "method": "POST",
+  "account_alias": "company-a",
+  "body": {
+    "pageSize": 20,
+    "pageNo": 1
+  }
+}
+```
+
+服务会自动注入与 T+Cloud 相同的畅捷通开放平台请求头。好生意官方文档当前可能还没有模块树，具体业务路径以官方文档后续返回为准。
 
 `call_ydz_api`
 
