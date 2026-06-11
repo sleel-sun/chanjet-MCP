@@ -26,6 +26,12 @@ def list_hyc_modules() -> dict[str, Any]:
 
 
 @mcp.tool()
+def list_hsy_modules() -> dict[str, Any]:
+    """Return the official Chanjet HSY API document module tree."""
+    return client.list_hsy_modules()
+
+
+@mcp.tool()
 def list_ydz_modules() -> dict[str, Any]:
     """Return the official Chanjet YDZ/Finance API document module tree."""
     return client.list_ydz_modules()
@@ -47,6 +53,12 @@ def get_tcloud_doc(parent_code: str, module_code: str) -> dict[str, Any]:
 def get_hyc_doc(parent_code: str, module_code: str) -> dict[str, Any]:
     """Return official document/API details for a HYC/ZPlus module path."""
     return client.get_hyc_doc(parent_code=parent_code, module_code=module_code)
+
+
+@mcp.tool()
+def get_hsy_doc(parent_code: str, module_code: str) -> dict[str, Any]:
+    """Return official document/API details for a HSY module path."""
+    return client.get_hsy_doc(parent_code=parent_code, module_code=module_code)
 
 
 @mcp.tool()
@@ -74,6 +86,12 @@ def search_hyc_docs(query: str, limit: int = 20) -> list[dict[str, Any]]:
 
 
 @mcp.tool()
+def search_hsy_docs(query: str, limit: int = 20) -> list[dict[str, Any]]:
+    """Search HSY document modules by code or display name."""
+    return client.search_hsy_docs(query=query, limit=limit)
+
+
+@mcp.tool()
 def search_ydz_docs(query: str, limit: int = 20) -> list[dict[str, Any]]:
     """Search YDZ/Finance document modules by code or display name."""
     return client.search_ydz_docs(query=query, limit=limit)
@@ -83,6 +101,70 @@ def search_ydz_docs(query: str, limit: int = 20) -> list[dict[str, Any]]:
 def search_hkj_docs(query: str, limit: int = 20) -> list[dict[str, Any]]:
     """Search HKJ/Accounting document modules by code or display name."""
     return client.search_hkj_docs(query=query, limit=limit)
+
+
+@mcp.tool()
+def diagnose_config() -> dict[str, Any]:
+    """Return a safe readiness report for MCP client configuration."""
+    return client.safe_diagnose_config()
+
+
+@mcp.tool()
+def get_api_call_template(
+    product: str,
+    parent_code: str,
+    module_code: str,
+    api_name: str | None = None,
+) -> dict[str, Any]:
+    """Build ready-to-edit call templates from official API documentation."""
+    return client.safe_get_api_call_template(
+        product=product,
+        parent_code=parent_code,
+        module_code=module_code,
+        api_name=api_name,
+    )
+
+
+@mcp.tool()
+def search_api_templates(
+    query: str,
+    product: str | None = None,
+    api_name: str | None = None,
+    limit: int = 20,
+) -> dict[str, Any]:
+    """Search official docs and return ready-to-edit API call templates."""
+    return client.safe_search_api_templates(
+        query=query,
+        product=product,
+        api_name=api_name,
+        limit=limit,
+    )
+
+
+@mcp.tool()
+def call_api_template(
+    product: str,
+    parent_code: str,
+    module_code: str,
+    api_name: str | None = None,
+    body: dict[str, Any] | list[Any] | None = None,
+    query: dict[str, Any] | None = None,
+    headers: dict[str, str] | None = None,
+    account_alias: str | None = None,
+    method: str | None = None,
+) -> dict[str, Any]:
+    """Find an official API template and route the call to the right product tool."""
+    return client.safe_call_api_template(
+        product=product,
+        parent_code=parent_code,
+        module_code=module_code,
+        api_name=api_name,
+        body=body,
+        query=query,
+        headers=headers,
+        account_alias=account_alias,
+        method=method,
+    )
 
 
 @mcp.tool()
@@ -140,6 +222,26 @@ def call_hyc_api(
 ) -> Any:
     """Call an arbitrary HYC/ZPlus OpenAPI path using configured credentials."""
     return client.call_hyc_api(
+        path=path,
+        method=method,
+        body=body,
+        query=query,
+        headers=headers,
+        account_alias=account_alias,
+    )
+
+
+@mcp.tool()
+def call_hsy_api(
+    path: str,
+    method: str = "POST",
+    body: dict[str, Any] | list[Any] | None = None,
+    query: dict[str, Any] | None = None,
+    headers: dict[str, str] | None = None,
+    account_alias: str | None = None,
+) -> Any:
+    """Call an arbitrary HSY OpenAPI path using configured credentials."""
+    return client.call_hsy_api(
         path=path,
         method=method,
         body=body,

@@ -10,17 +10,82 @@ from urllib.parse import quote, urlencode
 
 from .settings import ChanjetSettings
 from .token_store import TokenStore
-from .transport import JsonTransport, UrlLibTransport
+from .transport import HttpTransportError, JsonTransport, UrlLibTransport
 
 
 TCLOUD_PRODUCT_CODE = "tcloud"
 HYC_PRODUCT_CODE = "zplus"
+HSY_PRODUCT_CODE = "hsy"
 YDZ_PRODUCT_CODE = "finance"
 HKJ_PRODUCT_CODE = "accounting"
 TPLUS_VOUCHER_COLUMN_SET_PATH = (
     "/tplus/api/v2/VoucherAPIService/GetColumnSetByBizCode"
 )
 VOUCHER_FIELD_SELECTION_KEYS = {"selectfields", "fields", "columns", "select"}
+PRODUCT_METADATA = {
+    TCLOUD_PRODUCT_CODE: {
+        "code": TCLOUD_PRODUCT_CODE,
+        "name": "T+Cloud",
+        "tool": "call_tplus_api",
+        "aliases": ("tcloud", "tplus", "t+"),
+    },
+    HYC_PRODUCT_CODE: {
+        "code": HYC_PRODUCT_CODE,
+        "name": "HYC/ZPlus",
+        "tool": "call_hyc_api",
+        "aliases": ("hyc", "zplus"),
+    },
+    HSY_PRODUCT_CODE: {
+        "code": HSY_PRODUCT_CODE,
+        "name": "HSY/好生意",
+        "tool": "call_hsy_api",
+        "aliases": ("hsy", "haoshengyi", "好生意"),
+    },
+    YDZ_PRODUCT_CODE: {
+        "code": YDZ_PRODUCT_CODE,
+        "name": "YDZ/Finance",
+        "tool": "call_ydz_api",
+        "aliases": ("ydz", "finance"),
+    },
+    HKJ_PRODUCT_CODE: {
+        "code": HKJ_PRODUCT_CODE,
+        "name": "HKJ/Accounting",
+        "tool": "call_hkj_api",
+        "aliases": ("hkj", "accounting"),
+    },
+}
+PRODUCT_ALIASES = {
+    alias: product_code
+    for product_code, metadata in PRODUCT_METADATA.items()
+    for alias in metadata["aliases"]
+}
+API_NAME_KEYS = (
+    "apiName",
+    "name",
+    "title",
+    "caption",
+    "interfaceName",
+    "methodName",
+)
+API_PATH_KEYS = (
+    "apiUrl",
+    "apiPath",
+    "path",
+    "url",
+    "requestUrl",
+    "requestPath",
+    "interfaceUrl",
+    "address",
+)
+API_METHOD_KEYS = ("requestMethod", "httpMethod", "method")
+API_BODY_KEYS = (
+    "requestBody",
+    "body",
+    "requestJson",
+    "requestExample",
+    "requestData",
+)
+API_QUERY_KEYS = ("query", "queryParams", "requestQuery", "urlParams")
 
 
 class ChanjetApiError(RuntimeError):
@@ -72,6 +137,9 @@ class ChanjetTCloudClient:
     def list_hyc_modules(self) -> dict[str, Any]:
         return self.list_modules(HYC_PRODUCT_CODE)
 
+    def list_hsy_modules(self) -> dict[str, Any]:
+        return self.list_modules(HSY_PRODUCT_CODE)
+
     def list_ydz_modules(self) -> dict[str, Any]:
         return self.list_modules(YDZ_PRODUCT_CODE)
 
@@ -105,6 +173,9 @@ class ChanjetTCloudClient:
 
     def get_hyc_doc(self, parent_code: str, module_code: str) -> dict[str, Any]:
         return self.get_doc(HYC_PRODUCT_CODE, parent_code, module_code)
+
+    def get_hsy_doc(self, parent_code: str, module_code: str) -> dict[str, Any]:
+        return self.get_doc(HSY_PRODUCT_CODE, parent_code, module_code)
 
     def get_ydz_doc(self, parent_code: str, module_code: str) -> dict[str, Any]:
         return self.get_doc(YDZ_PRODUCT_CODE, parent_code, module_code)
@@ -158,11 +229,384 @@ class ChanjetTCloudClient:
     def search_hyc_docs(self, query: str, limit: int = 20) -> list[dict[str, Any]]:
         return self.search_docs(HYC_PRODUCT_CODE, query, limit)
 
+    def search_hsy_docs(self, query: str, limit: int = 20) -> list[dict[str, Any]]:
+        return self.search_docs(HSY_PRODUCT_CODE, query, limit)
+
     def search_ydz_docs(self, query: str, limit: int = 20) -> list[dict[str, Any]]:
         return self.search_docs(YDZ_PRODUCT_CODE, query, limit)
 
     def search_hkj_docs(self, query: str, limit: int = 20) -> list[dict[str, Any]]:
         return self.search_docs(HKJ_PRODUCT_CODE, query, limit)
+
+    def diagnose_config(self, *, now: int | float | None = None) -> dict[str, Any]:
+        current_time = int(now if now is not None else time.time())
+        active_alias = self._resolve_account_alias(None, allow_legacy=False)
+        account_summaries = self.token_store.list_account_summaries(
+            active_alias=active_alias
+        )
+        active_summary = next(
+            (
+                account
+                for account in account_summaries
+                if account["account_alias"] == active_alias
+            ),
+            None,
+        )
+        legacy_open_token = bool(self.settings.open_token)
+        legacy_refresh_token = bool(self.settings.refresh_token)
+        active_expires_at = (
+            active_summary.get("expires_at") if active_summary is not None else None
+        )
+        active_token_expired = self._expires_at_is_expired(
+            active_expires_at,
+            now=current_time,
+        )
+        has_active_open_token = bool(
+            active_summary and active_summary.get("has_open_token")
+        )
+        has_active_refresh_token = bool(
+            active_summary and active_summary.get("has_refresh_token")
+        )
+        if active_alias is None:
+            has_active_open_token = legacy_open_token
+            has_active_refresh_token = legacy_refresh_token
+
+        has_app_key = bool(self.settings.app_key)
+        has_app_secret = bool(self.settings.app_secret)
+        has_redirect_uri = bool(self.settings.redirect_uri)
+        if active_alias is None:
+            has_any_token = legacy_open_token or legacy_refresh_token
+        else:
+            has_any_token = has_active_open_token or has_active_refresh_token
+        business_api_calls = has_app_key and has_app_secret and has_any_token
+
+        issues: list[dict[str, str]] = []
+        if not has_app_key:
+            issues.append(
+                self._config_issue(
+                    "missing_app_key",
+                    "CHANJET_APP_KEY is not configured.",
+                    "Set CHANJET_APP_KEY in the MCP client env or .env file.",
+                )
+            )
+        if not has_app_secret:
+            issues.append(
+                self._config_issue(
+                    "missing_app_secret",
+                    "CHANJET_APP_SECRET is not configured.",
+                    "Set CHANJET_APP_SECRET in the MCP client env or .env file.",
+                )
+            )
+        if not has_redirect_uri:
+            issues.append(
+                self._config_issue(
+                    "missing_redirect_uri",
+                    "CHANJET_REDIRECT_URI is not configured.",
+                    "Set CHANJET_REDIRECT_URI or pass redirect_uri to OAuth tools.",
+                )
+            )
+        if active_alias and active_summary is None:
+            issues.append(
+                self._config_issue(
+                    "unknown_active_account",
+                    f"Active account '{active_alias}' does not exist in the token store.",
+                    "Run oauth_complete_setup for this alias or set another active account.",
+                )
+            )
+        if not has_any_token:
+            issues.append(
+                self._config_issue(
+                    "missing_token",
+                    "No open token or refresh token is available.",
+                    "Run oauth_complete_setup or configure CHANJET_OPEN_TOKEN/CHANJET_REFRESH_TOKEN.",
+                )
+            )
+        if active_token_expired and not has_active_refresh_token:
+            issues.append(
+                self._config_issue(
+                    "expired_token_without_refresh",
+                    "The active account open token is expired and no refresh token is available.",
+                    "Re-authorize the account with oauth_complete_setup.",
+                )
+            )
+
+        return {
+            "settings": {
+                "has_app_key": has_app_key,
+                "has_app_secret": has_app_secret,
+                "has_redirect_uri": has_redirect_uri,
+                "token_store_path": self.settings.token_store_path,
+                "base_url": self.settings.base_url,
+                "docs_api_url": self.settings.docs_api_url,
+                "timeout_seconds": self.settings.timeout_seconds,
+            },
+            "accounts": {
+                "active_account": active_alias,
+                "stored_account_count": len(account_summaries),
+                "active_account_exists": active_summary is not None,
+                "has_active_open_token": has_active_open_token,
+                "has_active_refresh_token": has_active_refresh_token,
+                "active_token_expired": active_token_expired,
+                "uses_legacy_open_token": legacy_open_token and active_alias is None,
+                "uses_legacy_refresh_token": legacy_refresh_token
+                and active_alias is None,
+            },
+            "capabilities": {
+                "documentation_lookup": True,
+                "oauth_url_generation": has_app_key and has_redirect_uri,
+                "token_exchange": has_app_key and has_redirect_uri,
+                "business_api_calls": business_api_calls,
+            },
+            "issues": issues,
+        }
+
+    def get_api_call_template(
+        self,
+        product: str,
+        parent_code: str,
+        module_code: str,
+        api_name: str | None = None,
+    ) -> dict[str, Any]:
+        metadata = self._product_metadata(product)
+        doc = self.get_doc(metadata["code"], parent_code, module_code)
+        requested_name = self._normalize_match_value(api_name) if api_name else ""
+        templates = []
+        for entry in self._extract_api_entries(doc):
+            template = self._api_entry_to_template(entry, metadata)
+            if requested_name:
+                haystack = self._normalize_match_value(
+                    " ".join(
+                        str(value)
+                        for value in (
+                            template["api_name"],
+                            template["path"],
+                            template["method"],
+                        )
+                        if value
+                    )
+                )
+                if requested_name not in haystack:
+                    continue
+            templates.append(template)
+
+        return {
+            "product": {
+                "input": product,
+                "code": metadata["code"],
+                "name": metadata["name"],
+                "tool": metadata["tool"],
+            },
+            "module": {
+                "parent_code": parent_code,
+                "module_code": module_code,
+                "module_name": doc.get("moduleName"),
+                "module_path": doc.get("modulePath"),
+            },
+            "templates": templates,
+        }
+
+    def search_api_templates(
+        self,
+        query: str,
+        product: str | None = None,
+        api_name: str | None = None,
+        limit: int = 20,
+    ) -> dict[str, Any]:
+        if not query:
+            raise ValueError("query is required")
+        product_metadatas = (
+            [self._product_metadata(product)]
+            if product
+            else [dict(metadata) for metadata in PRODUCT_METADATA.values()]
+        )
+        templates: list[dict[str, Any]] = []
+
+        for metadata in product_metadatas:
+            if len(templates) >= limit:
+                break
+            remaining = max(limit - len(templates), 1)
+            for module in self.search_docs(metadata["code"], query, limit=remaining):
+                template_result = self.get_api_call_template(
+                    product=metadata["code"],
+                    parent_code=module["parent_code"],
+                    module_code=module["module_code"],
+                    api_name=api_name,
+                )
+                for template in template_result["templates"]:
+                    enriched = copy.deepcopy(template)
+                    enriched["product"] = template_result["product"]
+                    enriched["module"] = template_result["module"]
+                    templates.append(enriched)
+                    if len(templates) >= limit:
+                        break
+                if len(templates) >= limit:
+                    break
+
+        return {
+            "query": query,
+            "product": product,
+            "api_name": api_name,
+            "templates": templates,
+        }
+
+    def call_api_template(
+        self,
+        product: str,
+        parent_code: str,
+        module_code: str,
+        api_name: str | None = None,
+        *,
+        body: Any = None,
+        query: dict[str, Any] | None = None,
+        headers: dict[str, str] | None = None,
+        account_alias: str | None = None,
+        method: str | None = None,
+    ) -> dict[str, Any]:
+        template_result = self.get_api_call_template(
+            product=product,
+            parent_code=parent_code,
+            module_code=module_code,
+            api_name=api_name,
+        )
+        if not template_result["templates"]:
+            raise ValueError("No API template matched the requested module and api_name")
+
+        template = template_result["templates"][0]
+        request_args = copy.deepcopy(template["arguments"])
+        if method is not None:
+            request_args["method"] = method
+        if body is not None:
+            request_args["body"] = body
+        if query is not None:
+            request_args["query"] = query
+        if headers is not None:
+            request_args["headers"] = headers
+        if account_alias is not None:
+            request_args["account_alias"] = account_alias
+
+        response = self._call_api_by_product(
+            template_result["product"]["code"],
+            path=request_args["path"],
+            method=request_args["method"],
+            body=request_args.get("body"),
+            query=request_args.get("query"),
+            headers=request_args.get("headers"),
+            account_alias=request_args.get("account_alias"),
+        )
+        return {
+            "template": template,
+            "request": request_args,
+            "data": response,
+        }
+
+    def safe_diagnose_config(self) -> dict[str, Any]:
+        try:
+            return self.tool_success(self.diagnose_config())
+        except Exception as exc:
+            return self.tool_error(exc)
+
+    def safe_get_api_call_template(
+        self,
+        product: str,
+        parent_code: str,
+        module_code: str,
+        api_name: str | None = None,
+    ) -> dict[str, Any]:
+        try:
+            return self.tool_success(
+                self.get_api_call_template(
+                    product=product,
+                    parent_code=parent_code,
+                    module_code=module_code,
+                    api_name=api_name,
+                )
+            )
+        except Exception as exc:
+            return self.tool_error(
+                exc,
+                hint=(
+                    "Use one of: tplus, tcloud, hyc, zplus, hsy, haoshengyi, "
+                    "ydz, finance, hkj, accounting."
+                ),
+            )
+
+    def safe_search_api_templates(
+        self,
+        query: str,
+        product: str | None = None,
+        api_name: str | None = None,
+        limit: int = 20,
+    ) -> dict[str, Any]:
+        try:
+            return self.tool_success(
+                self.search_api_templates(
+                    query=query,
+                    product=product,
+                    api_name=api_name,
+                    limit=limit,
+                )
+            )
+        except Exception as exc:
+            return self.tool_error(exc)
+
+    def safe_call_api_template(
+        self,
+        product: str,
+        parent_code: str,
+        module_code: str,
+        api_name: str | None = None,
+        *,
+        body: Any = None,
+        query: dict[str, Any] | None = None,
+        headers: dict[str, str] | None = None,
+        account_alias: str | None = None,
+        method: str | None = None,
+    ) -> dict[str, Any]:
+        try:
+            return self.tool_success(
+                self.call_api_template(
+                    product=product,
+                    parent_code=parent_code,
+                    module_code=module_code,
+                    api_name=api_name,
+                    body=body,
+                    query=query,
+                    headers=headers,
+                    account_alias=account_alias,
+                    method=method,
+                )
+            )
+        except Exception as exc:
+            return self.tool_error(exc)
+
+    def tool_success(self, data: Any) -> dict[str, Any]:
+        return {"ok": True, "data": data}
+
+    def tool_error(self, error: Exception, *, hint: str | None = None) -> dict[str, Any]:
+        code = "internal_error"
+        message = str(error) or error.__class__.__name__
+        trace_id = None
+        resolved_hint = hint
+
+        if isinstance(error, ChanjetApiError):
+            code = error.code or "chanjet_api_error"
+            message = error.message
+            resolved_hint = hint or error.hint
+            trace_id = error.trace_id
+        elif isinstance(error, ValueError):
+            code = "invalid_argument"
+        elif isinstance(error, HttpTransportError):
+            code = "transport_error"
+
+        return {
+            "ok": False,
+            "error": {
+                "code": code,
+                "message": message,
+                "hint": resolved_hint,
+                "trace_id": trace_id,
+            },
+        }
 
     def call_chanjet_api(
         self,
@@ -278,6 +722,25 @@ class ChanjetTCloudClient:
         }
 
     def call_hyc_api(
+        self,
+        path: str,
+        *,
+        method: str = "POST",
+        body: Any = None,
+        query: dict[str, Any] | None = None,
+        headers: dict[str, str] | None = None,
+        account_alias: str | None = None,
+    ) -> Any:
+        return self.call_chanjet_api(
+            path=path,
+            method=method,
+            body=body,
+            query=query,
+            headers=headers,
+            account_alias=account_alias,
+        )
+
+    def call_hsy_api(
         self,
         path: str,
         *,
@@ -456,6 +919,178 @@ class ChanjetTCloudClient:
             "GET", f"{self.settings.base_url}/auth/token", params=params
         )
         return self._normalize_token_response(response)
+
+    def _call_api_by_product(
+        self,
+        product_code: str,
+        *,
+        path: str,
+        method: str,
+        body: Any = None,
+        query: dict[str, Any] | None = None,
+        headers: dict[str, str] | None = None,
+        account_alias: str | None = None,
+    ) -> Any:
+        if product_code == TCLOUD_PRODUCT_CODE:
+            return self.call_tplus_api(
+                path=path,
+                method=method,
+                body=body,
+                query=query,
+                headers=headers,
+                account_alias=account_alias,
+            )
+        if product_code == HYC_PRODUCT_CODE:
+            return self.call_hyc_api(
+                path=path,
+                method=method,
+                body=body,
+                query=query,
+                headers=headers,
+                account_alias=account_alias,
+            )
+        if product_code == HSY_PRODUCT_CODE:
+            return self.call_hsy_api(
+                path=path,
+                method=method,
+                body=body,
+                query=query,
+                headers=headers,
+                account_alias=account_alias,
+            )
+        if product_code == YDZ_PRODUCT_CODE:
+            return self.call_ydz_api(
+                path=path,
+                method=method,
+                body=body,
+                query=query,
+                headers=headers,
+                account_alias=account_alias,
+            )
+        if product_code == HKJ_PRODUCT_CODE:
+            return self.call_hkj_api(
+                path=path,
+                method=method,
+                body=body,
+                query=query,
+                headers=headers,
+                account_alias=account_alias,
+            )
+        raise ValueError(f"Unsupported product code: {product_code}")
+
+    def _config_issue(self, code: str, message: str, hint: str) -> dict[str, str]:
+        return {"code": code, "message": message, "hint": hint}
+
+    def _expires_at_is_expired(
+        self,
+        expires_at: Any,
+        *,
+        now: int | float,
+    ) -> bool | None:
+        if expires_at is None:
+            return None
+        try:
+            return int(now) >= int(expires_at)
+        except (TypeError, ValueError):
+            return True
+
+    def _product_metadata(self, product: str) -> dict[str, Any]:
+        if not product:
+            raise ValueError("product is required")
+        product_key = str(product).strip().casefold()
+        product_code = PRODUCT_ALIASES.get(product_key)
+        if product_code is None:
+            raise ValueError(f"Unsupported product: {product}")
+        return dict(PRODUCT_METADATA[product_code])
+
+    def _extract_api_entries(self, value: Any) -> list[dict[str, Any]]:
+        entries: list[dict[str, Any]] = []
+        seen: set[tuple[str, str]] = set()
+
+        def collect(item: Any) -> None:
+            if isinstance(item, list):
+                for child in item:
+                    collect(child)
+                return
+            if not isinstance(item, dict):
+                return
+
+            path = self._normalize_api_path(
+                self._first_mapping_value(item, API_PATH_KEYS)
+            )
+            if path:
+                name = self._first_mapping_value(item, API_NAME_KEYS) or path
+                key = (path, str(name))
+                if key not in seen:
+                    seen.add(key)
+                    entries.append(item)
+
+            for child in item.values():
+                if isinstance(child, (dict, list)):
+                    collect(child)
+
+        collect(value)
+        return entries
+
+    def _api_entry_to_template(
+        self,
+        entry: dict[str, Any],
+        product_metadata: dict[str, Any],
+    ) -> dict[str, Any]:
+        path = self._normalize_api_path(
+            self._first_mapping_value(entry, API_PATH_KEYS)
+        )
+        if not path:
+            raise ValueError("API document entry does not include a callable path")
+
+        api_name = self._first_mapping_value(entry, API_NAME_KEYS) or path
+        method = str(
+            self._first_mapping_value(entry, API_METHOD_KEYS) or "POST"
+        ).upper()
+        body = self._first_mapping_value(entry, API_BODY_KEYS)
+        query = self._first_mapping_value(entry, API_QUERY_KEYS)
+        headers = self._first_mapping_value(entry, ("headers", "requestHeaders"))
+
+        if body is None:
+            body = {}
+        if not isinstance(query, dict):
+            query = {}
+        if not isinstance(headers, dict):
+            headers = {}
+
+        arguments = {
+            "path": path,
+            "method": method,
+            "body": copy.deepcopy(body),
+            "query": copy.deepcopy(query),
+            "headers": copy.deepcopy(headers),
+            "account_alias": None,
+        }
+        return {
+            "api_name": str(api_name),
+            "path": path,
+            "method": method,
+            "body": copy.deepcopy(body),
+            "query": copy.deepcopy(query),
+            "headers": copy.deepcopy(headers),
+            "tool": product_metadata["tool"],
+            "arguments": arguments,
+        }
+
+    def _normalize_api_path(self, value: Any) -> str | None:
+        if value is None:
+            return None
+        path = str(value).strip()
+        if not path:
+            return None
+        if "://" in path:
+            parts = path.split("/", 3)
+            if len(parts) < 4:
+                return None
+            path = f"/{parts[3]}"
+        if not path.startswith("/"):
+            path = f"/{path}"
+        return path
 
     def _token_params(
         self,

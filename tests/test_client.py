@@ -248,6 +248,114 @@ class ClientTests(unittest.TestCase):
         self.assertEqual(transport.calls[0]["headers"]["openToken"], "open-token")
         self.assertEqual(transport.calls[0]["json_body"], {"pageSize": 20, "pageNo": 1})
 
+    def test_list_hsy_modules_uses_hsy_product_code(self):
+        client, transport = self.make_client(
+            [
+                {
+                    "result": True,
+                    "error": None,
+                    "value": {
+                        "productCode": "hsy",
+                        "productName": "好生意",
+                        "children": [],
+                    },
+                }
+            ]
+        )
+
+        result = client.list_hsy_modules()
+
+        self.assertEqual(result["productCode"], "hsy")
+        self.assertEqual(result["productName"], "好生意")
+        self.assertEqual(
+            transport.calls[0]["url"],
+            "https://openapi.chanjet.com/developer/api/doc-center/modulesNameByCode/hsy",
+        )
+
+    def test_get_hsy_doc_uses_hsy_product_code(self):
+        client, transport = self.make_client(
+            [
+                {
+                    "result": True,
+                    "error": None,
+                    "value": {"modulePath": "好生意API", "documentApiInfoList": []},
+                }
+            ]
+        )
+
+        result = client.get_hsy_doc("hsyxxdy", "hsy_product")
+
+        self.assertEqual(result["modulePath"], "好生意API")
+        self.assertEqual(
+            transport.calls[0]["url"],
+            "https://openapi.chanjet.com/developer/api/doc-center/details/hsy/hsyxxdy/hsy_product",
+        )
+
+    def test_search_hsy_docs_matches_module_code_and_name(self):
+        client, _transport = self.make_client(
+            [
+                {
+                    "result": True,
+                    "error": None,
+                    "value": {
+                        "productCode": "hsy",
+                        "children": [
+                            {
+                                "moduleCode": "hsyxxdy",
+                                "moduleName": "好生意消息订阅",
+                                "children": [
+                                    {
+                                        "moduleCode": "hsy_product",
+                                        "moduleName": "商品",
+                                    },
+                                    {
+                                        "moduleCode": "hsy_warehouse_message",
+                                        "moduleName": "仓库",
+                                    },
+                                ],
+                            }
+                        ],
+                    },
+                }
+            ]
+        )
+
+        result = client.search_hsy_docs("仓库")
+
+        self.assertEqual(
+            result,
+            [
+                {
+                    "parent_code": "hsyxxdy",
+                    "parent_name": "好生意消息订阅",
+                    "module_code": "hsy_warehouse_message",
+                    "module_name": "仓库",
+                    "path": ["hsy", "hsyxxdy", "hsy_warehouse_message"],
+                }
+            ],
+        )
+
+    def test_call_hsy_api_injects_auth_headers_and_body(self):
+        client, transport = self.make_client(
+            [{"code": "openApi.e0000", "data": {"count": 1}}]
+        )
+
+        result = client.call_hsy_api(
+            "/accounting/openapi/cc/warehouse/list/123",
+            body={"pageSize": 20, "pageNo": 1},
+        )
+
+        self.assertEqual(result, {"code": "openApi.e0000", "data": {"count": 1}})
+        self.assertEqual(
+            transport.calls[0]["url"],
+            "https://openapi.chanjet.com/accounting/openapi/cc/warehouse/list/123",
+        )
+        self.assertEqual(transport.calls[0]["method"], "POST")
+        self.assertEqual(transport.calls[0]["headers"]["appKey"], "app-key")
+        self.assertEqual(transport.calls[0]["headers"]["appSecret"], "app-secret")
+        self.assertEqual(transport.calls[0]["headers"]["openToken"], "open-token")
+        self.assertEqual(transport.calls[0]["json_body"], {"pageSize": 20, "pageNo": 1})
+
     def test_list_ydz_modules_uses_finance_product_code(self):
         client, transport = self.make_client(
             [
@@ -627,6 +735,376 @@ class ClientTests(unittest.TestCase):
             transport.calls[1]["json_body"],
             {"param": {"selectFields": ["ExistingField"]}},
         )
+
+    def test_diagnose_config_reports_missing_credentials(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            token_store = TokenStore(Path(tmp_dir) / "tokens.json")
+            settings = ChanjetSettings(token_store_path=str(Path(tmp_dir) / "tokens.json"))
+            client, _transport = self.make_client(
+                [],
+                settings=settings,
+                token_store=token_store,
+            )
+
+            result = client.diagnose_config(now=1_000)
+
+            self.assertFalse(result["settings"]["has_app_key"])
+            self.assertFalse(result["settings"]["has_app_secret"])
+            self.assertFalse(result["settings"]["has_redirect_uri"])
+            self.assertEqual(result["accounts"]["stored_account_count"], 0)
+            self.assertIsNone(result["accounts"]["active_account"])
+            self.assertFalse(result["accounts"]["has_active_open_token"])
+            self.assertFalse(result["accounts"]["has_active_refresh_token"])
+            self.assertTrue(result["capabilities"]["documentation_lookup"])
+            self.assertFalse(result["capabilities"]["oauth_url_generation"])
+            self.assertFalse(result["capabilities"]["token_exchange"])
+            self.assertFalse(result["capabilities"]["business_api_calls"])
+            self.assertEqual(
+                {issue["code"] for issue in result["issues"]},
+                {
+                    "missing_app_key",
+                    "missing_app_secret",
+                    "missing_redirect_uri",
+                    "missing_token",
+                },
+            )
+
+    def test_diagnose_config_reports_active_stored_account(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            token_store = TokenStore(Path(tmp_dir) / "tokens.json")
+            token_store.save_token_response(
+                "company-a",
+                {
+                    "access_token": "stored-open-token",
+                    "refresh_token": "stored-refresh-token",
+                    "expires_in": 600,
+                },
+                now=1_000,
+                make_active=True,
+            )
+            settings = ChanjetSettings(
+                app_key="app-key",
+                app_secret="app-secret",
+                redirect_uri="https://example.test/oauth/callback",
+                token_store_path=str(Path(tmp_dir) / "tokens.json"),
+            )
+            client, _transport = self.make_client(
+                [],
+                settings=settings,
+                token_store=token_store,
+            )
+
+            result = client.diagnose_config(now=1_100)
+
+            self.assertTrue(result["settings"]["has_app_key"])
+            self.assertTrue(result["settings"]["has_app_secret"])
+            self.assertTrue(result["settings"]["has_redirect_uri"])
+            self.assertEqual(result["accounts"]["stored_account_count"], 1)
+            self.assertEqual(result["accounts"]["active_account"], "company-a")
+            self.assertTrue(result["accounts"]["active_account_exists"])
+            self.assertTrue(result["accounts"]["has_active_open_token"])
+            self.assertTrue(result["accounts"]["has_active_refresh_token"])
+            self.assertFalse(result["accounts"]["active_token_expired"])
+            self.assertTrue(result["capabilities"]["oauth_url_generation"])
+            self.assertTrue(result["capabilities"]["token_exchange"])
+            self.assertTrue(result["capabilities"]["business_api_calls"])
+            self.assertEqual(result["issues"], [])
+            self.assertNotIn("stored-open-token", str(result))
+            self.assertNotIn("stored-refresh-token", str(result))
+
+    def test_diagnose_config_does_not_use_legacy_token_with_unknown_active_account(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            token_store = TokenStore(Path(tmp_dir) / "tokens.json")
+            settings = ChanjetSettings(
+                app_key="app-key",
+                app_secret="app-secret",
+                open_token="legacy-open-token",
+                active_account="missing-company",
+                token_store_path=str(Path(tmp_dir) / "tokens.json"),
+            )
+            client, _transport = self.make_client(
+                [],
+                settings=settings,
+                token_store=token_store,
+            )
+
+            result = client.diagnose_config(now=1_000)
+
+            self.assertFalse(result["capabilities"]["business_api_calls"])
+            self.assertEqual(
+                {issue["code"] for issue in result["issues"]},
+                {"missing_redirect_uri", "unknown_active_account", "missing_token"},
+            )
+            self.assertNotIn("legacy-open-token", str(result))
+
+    def test_get_api_call_template_extracts_tplus_templates(self):
+        client, transport = self.make_client(
+            [
+                {
+                    "result": True,
+                    "error": None,
+                    "value": {
+                        "modulePath": "T+Cloud / 基础档案 / 仓库",
+                        "moduleName": "仓库",
+                        "documentApiInfoList": [
+                            {
+                                "apiName": "仓库查询",
+                                "apiUrl": "/tplus/api/v2/warehouse/Query",
+                                "requestMethod": "POST",
+                                "requestBody": {"param": {"Code": "01"}},
+                            }
+                        ],
+                    },
+                }
+            ]
+        )
+
+        result = client.get_api_call_template(
+            product="tplus",
+            parent_code="t+jcda",
+            module_code="t+ck",
+        )
+
+        self.assertEqual(result["product"]["code"], "tcloud")
+        self.assertEqual(result["product"]["tool"], "call_tplus_api")
+        self.assertEqual(result["module"]["module_path"], "T+Cloud / 基础档案 / 仓库")
+        self.assertEqual(len(result["templates"]), 1)
+        template = result["templates"][0]
+        self.assertEqual(template["api_name"], "仓库查询")
+        self.assertEqual(template["path"], "/tplus/api/v2/warehouse/Query")
+        self.assertEqual(template["method"], "POST")
+        self.assertEqual(template["body"], {"param": {"Code": "01"}})
+        self.assertEqual(template["tool"], "call_tplus_api")
+        self.assertEqual(
+            template["arguments"],
+            {
+                "path": "/tplus/api/v2/warehouse/Query",
+                "method": "POST",
+                "body": {"param": {"Code": "01"}},
+                "query": {},
+                "headers": {},
+                "account_alias": None,
+            },
+        )
+        self.assertEqual(
+            transport.calls[0]["url"],
+            "https://openapi.chanjet.com/developer/api/doc-center/details/tcloud/t%2Bjcda/t%2Bck",
+        )
+
+    def test_get_api_call_template_extracts_hsy_templates(self):
+        client, transport = self.make_client(
+            [
+                {
+                    "result": True,
+                    "error": None,
+                    "value": {
+                        "modulePath": "好生意 / 消息订阅 / 仓库",
+                        "moduleName": "仓库",
+                        "documentApiInfoList": [
+                            {
+                                "apiName": "仓库查询",
+                                "apiUrl": "/accounting/openapi/cc/warehouse/list/123",
+                                "requestMethod": "POST",
+                            }
+                        ],
+                    },
+                }
+            ]
+        )
+
+        result = client.get_api_call_template(
+            product="hsy",
+            parent_code="hsyxxdy",
+            module_code="hsy_warehouse_message",
+        )
+
+        self.assertEqual(result["product"]["code"], "hsy")
+        self.assertEqual(result["product"]["tool"], "call_hsy_api")
+        self.assertEqual(result["templates"][0]["tool"], "call_hsy_api")
+        self.assertEqual(
+            transport.calls[0]["url"],
+            "https://openapi.chanjet.com/developer/api/doc-center/details/hsy/hsyxxdy/hsy_warehouse_message",
+        )
+
+    def test_get_api_call_template_filters_by_api_name(self):
+        client, _transport = self.make_client(
+            [
+                {
+                    "result": True,
+                    "error": None,
+                    "value": {
+                        "documentApiInfoList": [
+                            {
+                                "apiName": "仓库查询",
+                                "apiUrl": "/tplus/api/v2/warehouse/Query",
+                            },
+                            {
+                                "apiName": "仓库新增",
+                                "apiUrl": "/tplus/api/v2/warehouse/Create",
+                            },
+                        ],
+                    },
+                }
+            ]
+        )
+
+        result = client.get_api_call_template(
+            product="tcloud",
+            parent_code="t+jcda",
+            module_code="t+ck",
+            api_name="新增",
+        )
+
+        self.assertEqual(len(result["templates"]), 1)
+        self.assertEqual(result["templates"][0]["api_name"], "仓库新增")
+        self.assertEqual(result["templates"][0]["path"], "/tplus/api/v2/warehouse/Create")
+
+    def test_search_api_templates_returns_ready_to_call_templates(self):
+        client, transport = self.make_client(
+            [
+                {
+                    "result": True,
+                    "error": None,
+                    "value": {
+                        "productCode": "tcloud",
+                        "children": [
+                            {
+                                "moduleCode": "t+jcda",
+                                "moduleName": "T+基础档案",
+                                "children": [
+                                    {
+                                        "moduleCode": "t+ck",
+                                        "moduleName": "仓库",
+                                    }
+                                ],
+                            }
+                        ],
+                    },
+                },
+                {
+                    "result": True,
+                    "error": None,
+                    "value": {
+                        "modulePath": "T+Cloud / 基础档案 / 仓库",
+                        "moduleName": "仓库",
+                        "documentApiInfoList": [
+                            {
+                                "apiName": "仓库查询",
+                                "apiUrl": "/tplus/api/v2/warehouse/Query",
+                                "requestMethod": "POST",
+                            }
+                        ],
+                    },
+                },
+            ]
+        )
+
+        result = client.search_api_templates(
+            query="仓库",
+            product="tplus",
+            api_name="查询",
+        )
+
+        self.assertEqual(result["query"], "仓库")
+        self.assertEqual(result["product"], "tplus")
+        self.assertEqual(len(result["templates"]), 1)
+        template = result["templates"][0]
+        self.assertEqual(template["product"]["code"], "tcloud")
+        self.assertEqual(template["module"]["parent_code"], "t+jcda")
+        self.assertEqual(template["module"]["module_code"], "t+ck")
+        self.assertEqual(template["api_name"], "仓库查询")
+        self.assertEqual(template["tool"], "call_tplus_api")
+        self.assertEqual(template["arguments"]["path"], "/tplus/api/v2/warehouse/Query")
+        self.assertEqual(
+            [call["url"] for call in transport.calls],
+            [
+                "https://openapi.chanjet.com/developer/api/doc-center/modulesNameByCode/tcloud",
+                "https://openapi.chanjet.com/developer/api/doc-center/details/tcloud/t%2Bjcda/t%2Bck",
+            ],
+        )
+
+    def test_call_api_template_routes_to_matching_product_call(self):
+        client, transport = self.make_client(
+            [
+                {
+                    "result": True,
+                    "error": None,
+                    "value": {
+                        "modulePath": "T+Cloud / 基础档案 / 仓库",
+                        "moduleName": "仓库",
+                        "documentApiInfoList": [
+                            {
+                                "apiName": "仓库查询",
+                                "apiUrl": "/tplus/api/v2/warehouse/Query",
+                                "requestMethod": "POST",
+                                "requestBody": {"param": {"Code": "from-template"}},
+                            }
+                        ],
+                    },
+                },
+                {"code": "0", "data": [{"Code": "01"}]},
+            ]
+        )
+
+        result = client.call_api_template(
+            product="tplus",
+            parent_code="t+jcda",
+            module_code="t+ck",
+            api_name="查询",
+            body={"param": {"Code": "01"}},
+        )
+
+        self.assertEqual(result["template"]["api_name"], "仓库查询")
+        self.assertEqual(result["request"]["path"], "/tplus/api/v2/warehouse/Query")
+        self.assertEqual(result["request"]["body"], {"param": {"Code": "01"}})
+        self.assertEqual(result["data"], {"code": "0", "data": [{"Code": "01"}]})
+        self.assertEqual(
+            transport.calls[1]["url"],
+            "https://openapi.chanjet.com/tplus/api/v2/warehouse/Query",
+        )
+        self.assertEqual(transport.calls[1]["method"], "POST")
+        self.assertEqual(transport.calls[1]["headers"]["appKey"], "app-key")
+        self.assertEqual(transport.calls[1]["headers"]["appSecret"], "app-secret")
+        self.assertEqual(transport.calls[1]["headers"]["openToken"], "open-token")
+        self.assertEqual(
+            transport.calls[1]["json_body"],
+            {"param": {"Code": "01"}},
+        )
+
+    def test_tool_error_envelope_from_value_error(self):
+        client, _transport = self.make_client([])
+
+        result = client.tool_error(
+            ValueError("product is required"),
+            hint="Pass product such as tplus, hyc, ydz, or hkj.",
+        )
+
+        self.assertEqual(
+            result,
+            {
+                "ok": False,
+                "error": {
+                    "code": "invalid_argument",
+                    "message": "product is required",
+                    "hint": "Pass product such as tplus, hyc, ydz, or hkj.",
+                    "trace_id": None,
+                },
+            },
+        )
+
+    def test_safe_get_api_call_template_wraps_invalid_product(self):
+        client, _transport = self.make_client([])
+
+        result = client.safe_get_api_call_template(
+            product="unknown",
+            parent_code="p",
+            module_code="m",
+        )
+
+        self.assertFalse(result["ok"])
+        self.assertEqual(result["error"]["code"], "invalid_argument")
+        self.assertIn("Unsupported product", result["error"]["message"])
+        self.assertIn("tplus", result["error"]["hint"])
 
     def test_get_auth_url_contains_oauth_parameters_and_signature(self):
         settings = ChanjetSettings(app_key="app-key")
