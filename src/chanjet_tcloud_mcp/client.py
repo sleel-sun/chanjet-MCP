@@ -21,7 +21,40 @@ HKJ_PRODUCT_CODE = "accounting"
 TPLUS_VOUCHER_COLUMN_SET_PATH = (
     "/tplus/api/v2/VoucherAPIService/GetColumnSetByBizCode"
 )
+TPLUS_VOUCHER_SEARCH_ITEM_PATH = (
+    "/tplus/api/v2/VoucherAPIService/GetSearchItemByBizCode"
+)
+TPLUS_VOUCHER_LIST_FIELD_DOC_PARENT_CODE = "t+dj"
+TPLUS_VOUCHER_LIST_FIELD_DOC_MODULE_CODE = "djlbcxfz"
+TPLUS_DESCRIPTION_PARENT_CODE = "t+xdescription"
+TPLUS_VOUCHER_TYPE_MODULE_CODE = "t+vouchertype"
+TPLUS_BUSINESS_TYPE_MODULE_CODE = "t+busitype"
 VOUCHER_FIELD_SELECTION_KEYS = {"selectfields", "fields", "columns", "select"}
+REFERENCE_CODE_KEYS = (
+    "code",
+    "bizCode",
+    "businessType",
+    "BusinessType",
+    "value",
+    "key",
+    "编码",
+    "业务编码",
+    "单据编码",
+    "单据类型编码",
+    "业务类型编码",
+)
+REFERENCE_NAME_KEYS = (
+    "name",
+    "label",
+    "title",
+    "caption",
+    "text",
+    "名称",
+    "单据名称",
+    "单据类型",
+    "业务名称",
+    "业务类型",
+)
 PRODUCT_METADATA = {
     TCLOUD_PRODUCT_CODE: {
         "code": TCLOUD_PRODUCT_CODE,
@@ -237,6 +270,87 @@ class ChanjetTCloudClient:
 
     def search_hkj_docs(self, query: str, limit: int = 20) -> list[dict[str, Any]]:
         return self.search_docs(HKJ_PRODUCT_CODE, query, limit)
+
+    def get_tplus_reference_codes(self, query: str | None = None) -> dict[str, Any]:
+        voucher_doc = self.get_tcloud_doc(
+            TPLUS_DESCRIPTION_PARENT_CODE,
+            TPLUS_VOUCHER_TYPE_MODULE_CODE,
+        )
+        business_doc = self.get_tcloud_doc(
+            TPLUS_DESCRIPTION_PARENT_CODE,
+            TPLUS_BUSINESS_TYPE_MODULE_CODE,
+        )
+        voucher_types = self._filter_reference_code_rows(
+            self._extract_reference_code_rows(voucher_doc),
+            query,
+        )
+        business_types = self._filter_reference_code_rows(
+            self._extract_reference_code_rows(business_doc),
+            query,
+        )
+
+        return {
+            "voucher_types": voucher_types,
+            "business_types": business_types,
+            "source_docs": {
+                "voucher_types": {
+                    "product": TCLOUD_PRODUCT_CODE,
+                    "parent_code": TPLUS_DESCRIPTION_PARENT_CODE,
+                    "module_code": TPLUS_VOUCHER_TYPE_MODULE_CODE,
+                },
+                "business_types": {
+                    "product": TCLOUD_PRODUCT_CODE,
+                    "parent_code": TPLUS_DESCRIPTION_PARENT_CODE,
+                    "module_code": TPLUS_BUSINESS_TYPE_MODULE_CODE,
+                },
+            },
+        }
+
+    def get_tplus_voucher_list_fields(
+        self,
+        *,
+        biz_code: str,
+        query: str | None = None,
+        headers: dict[str, str] | None = None,
+        account_alias: str | None = None,
+    ) -> dict[str, Any]:
+        if not biz_code:
+            raise ValueError("biz_code is required")
+
+        request_body = self._voucher_field_request_body(biz_code)
+        search_response = self.call_tplus_api(
+            path=TPLUS_VOUCHER_SEARCH_ITEM_PATH,
+            method="POST",
+            body=request_body,
+            headers=headers,
+            account_alias=account_alias,
+        )
+        column_response = self.call_tplus_api(
+            path=TPLUS_VOUCHER_COLUMN_SET_PATH,
+            method="POST",
+            body=request_body,
+            headers=headers,
+            account_alias=account_alias,
+        )
+        query_fields = self._filter_voucher_fields(
+            self._extract_voucher_display_fields(search_response),
+            query,
+        )
+        display_fields = self._filter_voucher_fields(
+            self._extract_voucher_display_fields(column_response),
+            query,
+        )
+
+        return {
+            "biz_code": biz_code,
+            "query_fields": query_fields,
+            "display_fields": display_fields,
+            "source_doc": {
+                "product": TCLOUD_PRODUCT_CODE,
+                "parent_code": TPLUS_VOUCHER_LIST_FIELD_DOC_PARENT_CODE,
+                "module_code": TPLUS_VOUCHER_LIST_FIELD_DOC_MODULE_CODE,
+            },
+        }
 
     def diagnose_config(self, *, now: int | float | None = None) -> dict[str, Any]:
         current_time = int(now if now is not None else time.time())
@@ -505,6 +619,34 @@ class ChanjetTCloudClient:
         except Exception as exc:
             return self.tool_error(exc)
 
+    def safe_get_tplus_reference_codes(
+        self,
+        query: str | None = None,
+    ) -> dict[str, Any]:
+        try:
+            return self.tool_success(self.get_tplus_reference_codes(query=query))
+        except Exception as exc:
+            return self.tool_error(exc)
+
+    def safe_get_tplus_voucher_list_fields(
+        self,
+        biz_code: str,
+        query: str | None = None,
+        headers: dict[str, str] | None = None,
+        account_alias: str | None = None,
+    ) -> dict[str, Any]:
+        try:
+            return self.tool_success(
+                self.get_tplus_voucher_list_fields(
+                    biz_code=biz_code,
+                    query=query,
+                    headers=headers,
+                    account_alias=account_alias,
+                )
+            )
+        except Exception as exc:
+            return self.tool_error(exc)
+
     def safe_get_api_call_template(
         self,
         product: str,
@@ -689,14 +831,12 @@ class ChanjetTCloudClient:
         if not path:
             raise ValueError("path is required")
 
-        column_response = self.call_tplus_api(
-            path=TPLUS_VOUCHER_COLUMN_SET_PATH,
-            method="POST",
-            body=self._voucher_column_request_body(biz_code),
+        field_data = self.get_tplus_voucher_list_fields(
+            biz_code=biz_code,
             headers=headers,
             account_alias=account_alias,
         )
-        available_fields = self._extract_voucher_display_fields(column_response)
+        available_fields = field_data["display_fields"]
         matched_fields, unmatched_fields = self._match_display_fields(
             display_fields or [],
             available_fields,
@@ -716,9 +856,11 @@ class ChanjetTCloudClient:
 
         return {
             "data": list_response,
+            "query_fields": field_data["query_fields"],
             "display_fields": available_fields,
             "matched_display_fields": matched_fields,
             "unmatched_display_fields": unmatched_fields,
+            "source_doc": field_data["source_doc"],
         }
 
     def call_hyc_api(
@@ -1244,11 +1386,162 @@ class ChanjetTCloudClient:
         normalized_code = str(code).casefold()
         return normalized_code not in {"0", "200", "openapi.e0000"}
 
-    def _voucher_column_request_body(self, biz_code: str) -> dict[str, Any]:
+    def _voucher_field_request_body(self, biz_code: str) -> dict[str, Any]:
         return {
             "bizCode": biz_code,
             "apiParam": {"dataSource": "openapi"},
         }
+
+    def _voucher_column_request_body(self, biz_code: str) -> dict[str, Any]:
+        return self._voucher_field_request_body(biz_code)
+
+    def _extract_reference_code_rows(self, value: Any) -> list[dict[str, Any]]:
+        rows: list[dict[str, Any]] = []
+        seen: set[tuple[str, str]] = set()
+
+        def add_candidate(candidate: dict[str, Any]) -> None:
+            normalized = self._normalize_reference_code_row(candidate)
+            if normalized is None:
+                return
+            dedupe_key = (
+                self._normalize_match_value(normalized["code"]),
+                self._normalize_match_value(normalized["name"]),
+            )
+            if dedupe_key in seen:
+                return
+            seen.add(dedupe_key)
+            rows.append(normalized)
+
+        def collect(item: Any, *, list_item: bool = False) -> None:
+            if isinstance(item, str):
+                for parsed_row in self._extract_reference_rows_from_text(item):
+                    add_candidate(parsed_row)
+                return
+            if isinstance(item, list):
+                for child in item:
+                    collect(child, list_item=True)
+                return
+            if not isinstance(item, dict):
+                return
+
+            if list_item or self._first_mapping_value(item, REFERENCE_CODE_KEYS):
+                add_candidate(item)
+
+            for child in item.values():
+                if isinstance(child, (dict, list, str)):
+                    collect(child)
+
+        collect(value)
+        return rows
+
+    def _normalize_reference_code_row(
+        self,
+        value: dict[str, Any],
+    ) -> dict[str, Any] | None:
+        code = self._first_mapping_value(value, REFERENCE_CODE_KEYS)
+        name = self._first_mapping_value(value, REFERENCE_NAME_KEYS)
+        if code is None or name is None:
+            return None
+
+        code_text = str(code).strip()
+        name_text = str(name).strip()
+        if not code_text or not name_text:
+            return None
+        if self._normalize_match_value(code_text) == self._normalize_match_value(
+            name_text
+        ):
+            return None
+
+        return {
+            "code": code_text,
+            "name": name_text,
+            "raw": value,
+        }
+
+    def _extract_reference_rows_from_text(self, text: str) -> list[dict[str, str]]:
+        rows: list[dict[str, str]] = []
+        for line in text.splitlines():
+            cells = self._table_cells_from_text_line(line)
+            if len(cells) < 2 or self._looks_like_table_header(cells):
+                continue
+
+            first, second = cells[0], cells[1]
+            if self._looks_like_reference_code(first):
+                code, name = first, second
+            elif self._looks_like_reference_code(second):
+                code, name = second, first
+            else:
+                code, name = first, second
+            rows.append({"code": code, "name": name})
+        return rows
+
+    def _table_cells_from_text_line(self, line: str) -> list[str]:
+        cleaned = line.strip()
+        if not cleaned:
+            return []
+        if "<td" in cleaned.casefold():
+            parts = cleaned.replace("</td>", "|").replace("</th>", "|")
+            for marker in ("<tr>", "</tr>", "<tbody>", "</tbody>"):
+                parts = parts.replace(marker, "")
+            cells = []
+            for part in parts.split("|"):
+                text = part.split(">", 1)[-1].strip()
+                if text:
+                    cells.append(text)
+            return cells
+        if "|" not in cleaned:
+            return []
+        return [cell.strip() for cell in cleaned.strip("|").split("|") if cell.strip()]
+
+    def _looks_like_table_header(self, cells: list[str]) -> bool:
+        normalized_cells = [self._normalize_match_value(cell) for cell in cells]
+        if all(set(cell) <= {"-"} for cell in cells):
+            return True
+        if not any(self._looks_like_reference_code(cell) for cell in cells):
+            header_markers = (
+                "code",
+                "name",
+                "bizcode",
+                "businesstype",
+                "编码",
+                "名称",
+                "类型",
+            )
+            if any(
+                marker in cell
+                for cell in normalized_cells
+                for marker in header_markers
+            ):
+                return True
+        return any(
+            cell in {"code", "编码", "name", "名称", "businesstype", "bizcode"}
+            for cell in normalized_cells
+        )
+
+    def _looks_like_reference_code(self, value: str) -> bool:
+        text = value.strip()
+        if not text:
+            return False
+        return all(ord(char) < 128 for char in text) and any(
+            char.isdigit() for char in text
+        )
+
+    def _filter_reference_code_rows(
+        self,
+        rows: list[dict[str, Any]],
+        query: str | None,
+    ) -> list[dict[str, Any]]:
+        normalized_query = self._normalize_match_value(query or "")
+        if not normalized_query:
+            return rows
+        return [
+            row
+            for row in rows
+            if any(
+                normalized_query in self._normalize_match_value(value)
+                for value in (row.get("code"), row.get("name"), row.get("raw"))
+            )
+        ]
 
     def _extract_voucher_display_fields(self, response: Any) -> list[dict[str, Any]]:
         display_fields: list[dict[str, Any]] = []
@@ -1284,6 +1577,26 @@ class ChanjetTCloudClient:
 
         collect(response)
         return display_fields
+
+    def _filter_voucher_fields(
+        self,
+        fields: list[dict[str, Any]],
+        query: str | None,
+    ) -> list[dict[str, Any]]:
+        normalized_query = self._normalize_match_value(query or "")
+        if not normalized_query:
+            return fields
+
+        filtered: list[dict[str, Any]] = []
+        for field in fields:
+            values = self._display_field_match_values(field)
+            raw_value = self._normalize_match_value(field.get("raw"))
+            if normalized_query in raw_value or any(
+                normalized_query in value or value in normalized_query
+                for value in values
+            ):
+                filtered.append(field)
+        return filtered
 
     def _normalize_display_field(self, value: Any) -> dict[str, Any] | None:
         if not isinstance(value, dict):

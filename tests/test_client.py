@@ -652,9 +652,126 @@ class ClientTests(unittest.TestCase):
         self.assertEqual(transport.calls[0]["headers"]["openToken"], "open-token")
         self.assertEqual(transport.calls[0]["json_body"], {"param": {"Code": "01"}})
 
+    def test_get_tplus_voucher_list_fields_fetches_query_and_display_fields(self):
+        client, transport = self.make_client(
+            [
+                {
+                    "code": "0",
+                    "data": {
+                        "items": [
+                            {"FieldName": "Code", "Caption": "单据编号"},
+                            {"FieldName": "CustomerName", "Caption": "客户"},
+                        ]
+                    },
+                },
+                {
+                    "code": "0",
+                    "data": {
+                        "columns": [
+                            {"FieldName": "Code", "Caption": "单据编号"},
+                            {"FieldName": "Amount", "Caption": "金额"},
+                        ]
+                    },
+                },
+            ]
+        )
+
+        result = client.get_tplus_voucher_list_fields(biz_code="SA04")
+
+        self.assertEqual(
+            [call["url"] for call in transport.calls],
+            [
+                "https://openapi.chanjet.com/tplus/api/v2/VoucherAPIService/GetSearchItemByBizCode",
+                "https://openapi.chanjet.com/tplus/api/v2/VoucherAPIService/GetColumnSetByBizCode",
+            ],
+        )
+        self.assertEqual(
+            transport.calls[0]["json_body"],
+            {"bizCode": "SA04", "apiParam": {"dataSource": "openapi"}},
+        )
+        self.assertEqual(transport.calls[1]["json_body"], transport.calls[0]["json_body"])
+        self.assertEqual(
+            [field["field"] for field in result["query_fields"]],
+            ["Code", "CustomerName"],
+        )
+        self.assertEqual(
+            [field["label"] for field in result["query_fields"]],
+            ["单据编号", "客户"],
+        )
+        self.assertEqual(
+            [field["field"] for field in result["display_fields"]],
+            ["Code", "Amount"],
+        )
+        self.assertEqual(
+            result["source_doc"],
+            {
+                "product": "tcloud",
+                "parent_code": "t+dj",
+                "module_code": "djlbcxfz",
+            },
+        )
+
+    def test_get_tplus_voucher_list_fields_filters_by_query(self):
+        client, _transport = self.make_client(
+            [
+                {
+                    "code": "0",
+                    "data": {
+                        "items": [
+                            {"field": "Code", "title": "单据编号"},
+                            {"field": "CustomerName", "title": "客户"},
+                        ]
+                    },
+                },
+                {
+                    "code": "0",
+                    "data": {
+                        "columns": [
+                            {"field": "Code", "title": "单据编号"},
+                            {"field": "Amount", "title": "金额"},
+                        ]
+                    },
+                },
+            ]
+        )
+
+        result = client.get_tplus_voucher_list_fields(
+            biz_code="SA04",
+            query="金额",
+        )
+
+        self.assertEqual(result["query_fields"], [])
+        self.assertEqual(
+            [(field["field"], field["label"]) for field in result["display_fields"]],
+            [("Amount", "金额")],
+        )
+
+    def test_safe_get_tplus_voucher_list_fields_wraps_success(self):
+        client, _transport = self.make_client(
+            [
+                {"code": "0", "data": [{"field": "Code", "title": "单据编号"}]},
+                {"code": "0", "data": [{"field": "Amount", "title": "金额"}]},
+            ]
+        )
+
+        result = client.safe_get_tplus_voucher_list_fields(biz_code="SA04")
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["data"]["biz_code"], "SA04")
+        self.assertEqual(result["data"]["query_fields"][0]["field"], "Code")
+
     def test_query_tplus_voucher_list_fetches_and_matches_display_fields(self):
         client, transport = self.make_client(
             [
+                {
+                    "code": "0",
+                    "data": {
+                        "items": [
+                            {"FieldName": "Code", "Caption": "单据编号"},
+                            {"FieldName": "CustomerName", "Caption": "客户"},
+                        ]
+                    },
+                },
                 {
                     "code": "0",
                     "data": {
@@ -676,10 +793,10 @@ class ClientTests(unittest.TestCase):
             display_fields=["单据编号", "客户", "不存在字段"],
         )
 
-        self.assertEqual(len(transport.calls), 2)
+        self.assertEqual(len(transport.calls), 3)
         self.assertEqual(
             transport.calls[0]["url"],
-            "https://openapi.chanjet.com/tplus/api/v2/VoucherAPIService/GetColumnSetByBizCode",
+            "https://openapi.chanjet.com/tplus/api/v2/VoucherAPIService/GetSearchItemByBizCode",
         )
         self.assertEqual(
             transport.calls[0]["json_body"],
@@ -687,10 +804,18 @@ class ClientTests(unittest.TestCase):
         )
         self.assertEqual(
             transport.calls[1]["url"],
-            "https://openapi.chanjet.com/tplus/api/v2/saleDelivery/Query",
+            "https://openapi.chanjet.com/tplus/api/v2/VoucherAPIService/GetColumnSetByBizCode",
         )
         self.assertEqual(
             transport.calls[1]["json_body"],
+            {"bizCode": "SA03", "apiParam": {"dataSource": "openapi"}},
+        )
+        self.assertEqual(
+            transport.calls[2]["url"],
+            "https://openapi.chanjet.com/tplus/api/v2/saleDelivery/Query",
+        )
+        self.assertEqual(
+            transport.calls[2]["json_body"],
             {"param": {"pageIndex": 1, "selectFields": ["Code", "CustomerName"]}},
         )
         self.assertEqual(
@@ -709,10 +834,20 @@ class ClientTests(unittest.TestCase):
             [field["field"] for field in result["display_fields"]],
             ["Code", "CustomerName", "Amount"],
         )
+        self.assertEqual(
+            [field["field"] for field in result["query_fields"]],
+            ["Code", "CustomerName"],
+        )
 
     def test_query_tplus_voucher_list_preserves_existing_field_selection(self):
         client, transport = self.make_client(
             [
+                {
+                    "code": "0",
+                    "data": [
+                        {"field": "Code", "title": "单据编号"},
+                    ],
+                },
                 {
                     "code": "0",
                     "data": [
@@ -732,9 +867,195 @@ class ClientTests(unittest.TestCase):
         )
 
         self.assertEqual(
-            transport.calls[1]["json_body"],
+            transport.calls[2]["json_body"],
             {"param": {"selectFields": ["ExistingField"]}},
         )
+
+    def test_get_tplus_reference_codes_fetches_voucher_and_business_type_docs(self):
+        client, transport = self.make_client(
+            [
+                {
+                    "result": True,
+                    "error": None,
+                    "value": {
+                        "rows": [
+                            {"code": "SA04", "name": "销货单"},
+                            {"code": "PU01", "name": "采购订单"},
+                        ]
+                    },
+                },
+                {
+                    "result": True,
+                    "error": None,
+                    "value": {
+                        "rows": [
+                            {"code": "01", "name": "普通采购"},
+                            {"code": "02", "name": "采购退货"},
+                        ]
+                    },
+                },
+            ]
+        )
+
+        result = client.get_tplus_reference_codes()
+
+        self.assertEqual(
+            result["voucher_types"],
+            [
+                {
+                    "code": "SA04",
+                    "name": "销货单",
+                    "raw": {"code": "SA04", "name": "销货单"},
+                },
+                {
+                    "code": "PU01",
+                    "name": "采购订单",
+                    "raw": {"code": "PU01", "name": "采购订单"},
+                },
+            ],
+        )
+        self.assertEqual(
+            result["business_types"],
+            [
+                {
+                    "code": "01",
+                    "name": "普通采购",
+                    "raw": {"code": "01", "name": "普通采购"},
+                },
+                {
+                    "code": "02",
+                    "name": "采购退货",
+                    "raw": {"code": "02", "name": "采购退货"},
+                },
+            ],
+        )
+        self.assertEqual(
+            result["source_docs"],
+            {
+                "voucher_types": {
+                    "product": "tcloud",
+                    "parent_code": "t+xdescription",
+                    "module_code": "t+vouchertype",
+                },
+                "business_types": {
+                    "product": "tcloud",
+                    "parent_code": "t+xdescription",
+                    "module_code": "t+busitype",
+                },
+            },
+        )
+        self.assertEqual(
+            [call["url"] for call in transport.calls],
+            [
+                "https://openapi.chanjet.com/developer/api/doc-center/details/tcloud/t%2Bxdescription/t%2Bvouchertype",
+                "https://openapi.chanjet.com/developer/api/doc-center/details/tcloud/t%2Bxdescription/t%2Bbusitype",
+            ],
+        )
+
+    def test_get_tplus_reference_codes_filters_by_query(self):
+        client, _transport = self.make_client(
+            [
+                {
+                    "result": True,
+                    "error": None,
+                    "value": {
+                        "rows": [
+                            {"code": "SA04", "name": "销货单"},
+                            {"code": "PU01", "name": "采购订单"},
+                        ]
+                    },
+                },
+                {
+                    "result": True,
+                    "error": None,
+                    "value": {
+                        "rows": [
+                            {"code": "01", "name": "普通采购"},
+                            {"code": "02", "name": "采购退货"},
+                        ]
+                    },
+                },
+            ]
+        )
+
+        result = client.get_tplus_reference_codes(query="采购退货")
+
+        self.assertEqual(result["voucher_types"], [])
+        self.assertEqual(
+            result["business_types"],
+            [
+                {
+                    "code": "02",
+                    "name": "采购退货",
+                    "raw": {"code": "02", "name": "采购退货"},
+                }
+            ],
+        )
+
+    def test_get_tplus_reference_codes_extracts_markdown_tables(self):
+        client, _transport = self.make_client(
+            [
+                {
+                    "result": True,
+                    "error": None,
+                    "value": {
+                        "content": "\n".join(
+                            [
+                                "| 单据类型编码 | 单据类型 |",
+                                "| --- | --- |",
+                                "| SA04 | 销货单 |",
+                            ]
+                        )
+                    },
+                },
+                {
+                    "result": True,
+                    "error": None,
+                    "value": {
+                        "content": "\n".join(
+                            [
+                                "| 业务类型 | 编码 |",
+                                "| --- | --- |",
+                                "| 采购退货 | 02 |",
+                            ]
+                        )
+                    },
+                },
+            ]
+        )
+
+        result = client.get_tplus_reference_codes()
+
+        self.assertEqual(
+            result["voucher_types"],
+            [{"code": "SA04", "name": "销货单", "raw": {"code": "SA04", "name": "销货单"}}],
+        )
+        self.assertEqual(
+            result["business_types"],
+            [{"code": "02", "name": "采购退货", "raw": {"code": "02", "name": "采购退货"}}],
+        )
+
+    def test_safe_get_tplus_reference_codes_wraps_success(self):
+        client, _transport = self.make_client(
+            [
+                {
+                    "result": True,
+                    "error": None,
+                    "value": {"rows": [{"code": "SA04", "name": "销货单"}]},
+                },
+                {
+                    "result": True,
+                    "error": None,
+                    "value": {"rows": [{"code": "02", "name": "采购退货"}]},
+                },
+            ]
+        )
+
+        result = client.safe_get_tplus_reference_codes(query="SA04")
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["data"]["voucher_types"][0]["code"], "SA04")
+        self.assertEqual(result["data"]["business_types"], [])
 
     def test_diagnose_config_reports_missing_credentials(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
