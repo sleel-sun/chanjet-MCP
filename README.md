@@ -13,6 +13,8 @@
 - 按关键词搜索 T+Cloud、HYC/ZPlus、HSY、YDZ/Finance 或 HKJ/Accounting 文档模块。
 - 诊断 MCP 客户端配置是否具备文档查询、OAuth 和业务接口调用能力。
 - 从官方接口文档生成可直接编辑的 MCP 调用模板。
+- 查询 T+ 单据类型 `bizCode` 和业务类型 `BusinessType` 对照表。
+- 查询 T+ 单据列表查询项字段和显示栏目字段。
 - 通用调用任意 `/tplus/api/...` 业务接口，自动注入 `appKey`、`appSecret`、`openToken`。
 - 通用调用任意 HYC/ZPlus `/accounting/openapi/...` 业务接口，自动注入 `appKey`、`appSecret`、`openToken`。
 - 通用调用任意 HSY OpenAPI 业务接口，自动注入 `appKey`、`appSecret`、`openToken`。
@@ -258,6 +260,150 @@ Claude 示例：
 
 `product` 可省略；省略时会依次搜索 T+Cloud、好业财、好生意、易代账和好会计。返回的每个模板都包含 `product`、`module`、`tool` 和 `arguments`。
 
+`get_tplus_reference_codes`
+
+获取 T+ 单据类型业务编码对照表和业务类型对照表。不知道单据类型 `bizCode` 或业务类型 `BusinessType` 时，先调用此工具。
+
+数据来源：
+
+- 单据类型：`tcloud/t+xdescription/t+vouchertype`
+- 业务类型：`tcloud/t+xdescription/t+busitype`
+
+参数：
+
+```json
+{
+  "query": "销货"
+}
+```
+
+`query` 可省略；省略时返回完整对照表。可按编码或名称筛选，例如 `SA04`、`销货单`、`02`、`采购退货`。
+
+使用说明：
+
+1. 不知道单据类型 `bizCode` 时，用单据名称查询。
+
+```json
+{
+  "query": "销货单"
+}
+```
+
+返回的 `voucher_types` 里找到对应 `code`，例如 `SA04`。后续调用 `query_tplus_voucher_list` 时把它作为 `biz_code`。
+
+2. 不知道业务类型 `BusinessType` 时，用业务类型名称查询。
+
+```json
+{
+  "query": "采购退货"
+}
+```
+
+返回的 `business_types` 里找到对应 `code`，例如 `02`。后续调用 T+ 业务接口时把它放进官方接口要求的业务参数字段，例如 `BusinessType`。
+
+3. 如果不确定关键词属于哪张表，可以直接传业务词。
+
+```json
+{
+  "query": "退货"
+}
+```
+
+工具会同时筛选 `voucher_types` 和 `business_types`；调用方根据返回项选择单据类型编码或业务类型编码。
+
+返回：
+
+```json
+{
+  "ok": true,
+  "data": {
+    "voucher_types": [
+      {
+        "code": "SA04",
+        "name": "销货单",
+        "raw": {}
+      }
+    ],
+    "business_types": [
+      {
+        "code": "02",
+        "name": "采购退货",
+        "raw": {}
+      }
+    ],
+    "source_docs": {
+      "voucher_types": {
+        "product": "tcloud",
+        "parent_code": "t+xdescription",
+        "module_code": "t+vouchertype"
+      },
+      "business_types": {
+        "product": "tcloud",
+        "parent_code": "t+xdescription",
+        "module_code": "t+busitype"
+      }
+    }
+  }
+}
+```
+
+`get_tplus_voucher_list_fields`
+
+获取 T+ 单据列表查询项字段和显示栏目字段。不知道列表接口的 `body.param` 查询字段，或不知道 `display_fields` 应该传什么时，先调用此工具。
+
+数据来源：官方 `tcloud/t+dj/djlbcxfz` 单据列表查询辅助页面。该页面对应两个辅助接口：
+
+- 查询项：`/tplus/api/v2/VoucherAPIService/GetSearchItemByBizCode`
+- 栏目项：`/tplus/api/v2/VoucherAPIService/GetColumnSetByBizCode`
+
+参数：
+
+```json
+{
+  "biz_code": "SA04",
+  "query": "客户",
+  "account_alias": "company-a"
+}
+```
+
+`query` 可省略；省略时返回当前单据类型的完整查询项和栏目项。可按字段编码或中文名称筛选，例如 `Code`、`单据编号`、`CustomerName`、`客户`。
+
+返回：
+
+```json
+{
+  "ok": true,
+  "data": {
+    "biz_code": "SA04",
+    "query_fields": [
+      {
+        "field": "Code",
+        "label": "单据编号",
+        "raw": {}
+      }
+    ],
+    "display_fields": [
+      {
+        "field": "CustomerName",
+        "label": "客户",
+        "raw": {}
+      }
+    ],
+    "source_doc": {
+      "product": "tcloud",
+      "parent_code": "t+dj",
+      "module_code": "djlbcxfz"
+    }
+  }
+}
+```
+
+使用说明：
+
+1. 查询项字段用于构造列表接口的 `body.param`。例如返回 `query_fields` 里有 `Code` / `单据编号`，就可以在请求体里按官方接口要求传入对应查询条件。
+2. 显示栏目字段用于 `query_tplus_voucher_list.display_fields`。可以传中文名，工具会匹配成真实字段并注入 `body.param.selectFields`。
+3. 不知道 `biz_code` 时，先调用 `get_tplus_reference_codes` 查询单据类型编码。
+
 `call_api_template`
 
 根据官方文档模板自动选择对应产品调用工具。客户端只需要提供产品、模块编码、可选接口名和业务参数，不需要自己选择 `call_tplus_api` / `call_hyc_api` 等底层工具。
@@ -307,7 +453,7 @@ Claude 示例：
 }
 ```
 
-`diagnose_config`、`get_api_call_template`、`search_api_templates` 和 `call_api_template` 使用统一错误结构：
+`diagnose_config`、`get_api_call_template`、`search_api_templates`、`get_tplus_reference_codes`、`get_tplus_voucher_list_fields` 和 `call_api_template` 使用统一错误结构：
 
 ```json
 {
@@ -503,8 +649,16 @@ Claude 示例：
 
 `query_tplus_voucher_list`
 
-查询 T+ 单据列表的专用工具。服务会先调用官方栏目辅助接口
-`/tplus/api/v2/VoucherAPIService/GetColumnSetByBizCode` 获取当前单据编码的全部列表显示字段，再把 `display_fields` 自动匹配成真实字段并注入到列表查询请求中。
+查询 T+ 单据列表的专用工具。服务会先调用官方单据列表查询辅助接口，获取当前单据编码的查询项字段和显示栏目字段，再把 `display_fields` 自动匹配成真实字段并注入到列表查询请求中。
+
+辅助接口来源于 `tcloud/t+dj/djlbcxfz`：
+
+- 查询项：`/tplus/api/v2/VoucherAPIService/GetSearchItemByBizCode`
+- 栏目项：`/tplus/api/v2/VoucherAPIService/GetColumnSetByBizCode`
+
+如果不知道 `biz_code` 应该传什么，或业务参数里需要 `BusinessType` 但不知道编码，先调用 `get_tplus_reference_codes` 查询对照表。
+
+如果不知道 `body.param` 支持哪些查询字段，或不知道 `display_fields` 支持哪些显示栏目，先调用 `get_tplus_voucher_list_fields`。
 
 参数示例：
 
@@ -524,11 +678,12 @@ Claude 示例：
 }
 ```
 
-返回值包含实际列表查询响应、全部可用显示字段、已匹配字段和未匹配字段：
+返回值包含实际列表查询响应、全部可用查询项字段、全部可用显示字段、已匹配字段和未匹配字段：
 
 ```json
 {
   "data": {},
+  "query_fields": [],
   "display_fields": [],
   "matched_display_fields": [],
   "unmatched_display_fields": []

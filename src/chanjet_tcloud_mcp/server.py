@@ -153,7 +153,11 @@ def call_api_template(
     account_alias: str | None = None,
     method: str | None = None,
 ) -> dict[str, Any]:
-    """Find an official API template and route the call to the right product tool."""
+    """Find an official API template and route the call to the right product tool.
+
+    For T+ calls, if the request needs a voucher bizCode or BusinessType and
+    the exact code is unknown, call get_tplus_reference_codes first.
+    """
     return client.safe_call_api_template(
         product=product,
         parent_code=parent_code,
@@ -168,6 +172,38 @@ def call_api_template(
 
 
 @mcp.tool()
+def get_tplus_reference_codes(query: str | None = None) -> dict[str, Any]:
+    """Return T+ voucher bizCode and BusinessType reference rows.
+
+    Call this first when a T+ request needs a voucher bizCode or BusinessType
+    and the exact code is unknown. Search by code or name, for example SA04,
+    销货单, 02, or 采购退货.
+    """
+    return client.safe_get_tplus_reference_codes(query=query)
+
+
+@mcp.tool()
+def get_tplus_voucher_list_fields(
+    biz_code: str,
+    query: str | None = None,
+    headers: dict[str, str] | None = None,
+    account_alias: str | None = None,
+) -> dict[str, Any]:
+    """Return T+ voucher list query fields and display columns for a bizCode.
+
+    Call this before query_tplus_voucher_list when valid body.param query
+    fields or display_fields are unknown. The helper APIs are documented by
+    tcloud/t+dj/djlbcxfz.
+    """
+    return client.safe_get_tplus_voucher_list_fields(
+        biz_code=biz_code,
+        query=query,
+        headers=headers,
+        account_alias=account_alias,
+    )
+
+
+@mcp.tool()
 def call_tplus_api(
     path: str,
     method: str = "POST",
@@ -176,7 +212,11 @@ def call_tplus_api(
     headers: dict[str, str] | None = None,
     account_alias: str | None = None,
 ) -> Any:
-    """Call an arbitrary T+ OpenAPI path using configured Chanjet credentials."""
+    """Call an arbitrary T+ OpenAPI path using configured Chanjet credentials.
+
+    If the request body needs BusinessType and the exact code is unknown,
+    call get_tplus_reference_codes first and use a business_types code.
+    """
     return client.call_tplus_api(
         path=path,
         method=method,
@@ -198,7 +238,12 @@ def query_tplus_voucher_list(
     headers: dict[str, str] | None = None,
     account_alias: str | None = None,
 ) -> dict[str, Any]:
-    """Query a T+ voucher list after preloading and matching display fields."""
+    """Query a T+ voucher list after preloading and matching display fields.
+
+    If biz_code is unknown, call get_tplus_reference_codes first and use a
+    voucher_types code as biz_code. If body.param query fields or display
+    columns are unknown, call get_tplus_voucher_list_fields first.
+    """
     return client.query_tplus_voucher_list(
         biz_code=biz_code,
         path=path,
