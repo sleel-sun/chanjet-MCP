@@ -1392,6 +1392,192 @@ class ClientTests(unittest.TestCase):
             {"param": {"Code": "01"}},
         )
 
+    def test_call_tplus_api_smart_uses_template_and_resolves_natural_inputs(self):
+        client, transport = self.make_client(
+            [
+                {
+                    "result": True,
+                    "error": None,
+                    "value": {
+                        "modulePath": "T+Cloud / 销售 / 销货单列表",
+                        "moduleName": "销货单列表",
+                        "documentApiInfoList": [
+                            {
+                                "apiName": "销货单列表查询",
+                                "apiUrl": "/tplus/api/v2/saleDelivery/Query",
+                                "requestMethod": "POST",
+                                "requestBody": {
+                                    "param": {
+                                        "pageIndex": 1,
+                                        "pageSize": 20,
+                                    }
+                                },
+                            }
+                        ],
+                    },
+                },
+                {
+                    "result": True,
+                    "error": None,
+                    "value": {"rows": [{"code": "SA04", "name": "销货单"}]},
+                },
+                {
+                    "result": True,
+                    "error": None,
+                    "value": {"rows": [{"code": "02", "name": "采购退货"}]},
+                },
+                {
+                    "code": "0",
+                    "data": {
+                        "items": [
+                            {"FieldName": "CustomerName", "Caption": "客户"},
+                            {"FieldName": "Code", "Caption": "单据编号"},
+                        ]
+                    },
+                },
+                {
+                    "code": "0",
+                    "data": {
+                        "columns": [
+                            {"FieldName": "Code", "Caption": "单据编号"},
+                            {"FieldName": "Amount", "Caption": "金额"},
+                        ]
+                    },
+                },
+                {"code": "0", "data": [{"Code": "SA-001", "Amount": 100}]},
+            ]
+        )
+
+        result = client.call_tplus_api_smart(
+            parent_code="t+xs",
+            module_code="saleDelivery",
+            api_name="列表查询",
+            voucher_name="销货单",
+            business_type_name="采购退货",
+            filters={"客户": "客户A"},
+            display_fields=["单据编号", "金额"],
+            body_overrides={"param": {"pageSize": 50}},
+        )
+
+        self.assertEqual(
+            [call["url"] for call in transport.calls],
+            [
+                "https://openapi.chanjet.com/developer/api/doc-center/details/tcloud/t%2Bxs/saleDelivery",
+                "https://openapi.chanjet.com/developer/api/doc-center/details/tcloud/t%2Bxdescription/t%2Bvouchertype",
+                "https://openapi.chanjet.com/developer/api/doc-center/details/tcloud/t%2Bxdescription/t%2Bbusitype",
+                "https://openapi.chanjet.com/tplus/api/v2/VoucherAPIService/GetSearchItemByBizCode",
+                "https://openapi.chanjet.com/tplus/api/v2/VoucherAPIService/GetColumnSetByBizCode",
+                "https://openapi.chanjet.com/tplus/api/v2/saleDelivery/Query",
+            ],
+        )
+        self.assertEqual(
+            transport.calls[5]["json_body"],
+            {
+                "param": {
+                    "pageIndex": 1,
+                    "pageSize": 50,
+                    "BusinessType": "02",
+                    "CustomerName": "客户A",
+                    "selectFields": ["Code", "Amount"],
+                }
+            },
+        )
+        self.assertEqual(result["template"]["body"], {"param": {"pageIndex": 1, "pageSize": 20}})
+        self.assertEqual(result["resolved"]["biz_code"], "SA04")
+        self.assertEqual(result["resolved"]["business_type"], "02")
+        self.assertEqual(
+            result["resolved"]["matched_filter_fields"],
+            [{"requested": "客户", "field": "CustomerName", "label": "客户"}],
+        )
+        self.assertEqual(
+            result["resolved"]["matched_display_fields"],
+            [
+                {"requested": "单据编号", "field": "Code", "label": "单据编号"},
+                {"requested": "金额", "field": "Amount", "label": "金额"},
+            ],
+        )
+        self.assertEqual(result["data"], {"code": "0", "data": [{"Code": "SA-001", "Amount": 100}]})
+
+    def test_call_tplus_api_smart_rejects_unmatched_filter(self):
+        client, transport = self.make_client(
+            [
+                {
+                    "result": True,
+                    "error": None,
+                    "value": {
+                        "documentApiInfoList": [
+                            {
+                                "apiName": "销货单列表查询",
+                                "apiUrl": "/tplus/api/v2/saleDelivery/Query",
+                                "requestMethod": "POST",
+                                "requestBody": {"param": {}},
+                            }
+                        ]
+                    },
+                },
+                {
+                    "code": "0",
+                    "data": [{"field": "Code", "title": "单据编号"}],
+                },
+                {
+                    "code": "0",
+                    "data": [{"field": "Code", "title": "单据编号"}],
+                },
+            ]
+        )
+
+        with self.assertRaises(ValueError) as raised:
+            client.call_tplus_api_smart(
+                parent_code="t+xs",
+                module_code="saleDelivery",
+                api_name="列表查询",
+                biz_code="SA04",
+                filters={"不存在字段": "x"},
+            )
+
+        self.assertIn("Unmatched filter fields", str(raised.exception))
+        self.assertEqual(len(transport.calls), 3)
+
+    def test_safe_call_tplus_api_smart_wraps_unmatched_filter(self):
+        client, _transport = self.make_client(
+            [
+                {
+                    "result": True,
+                    "error": None,
+                    "value": {
+                        "documentApiInfoList": [
+                            {
+                                "apiName": "销货单列表查询",
+                                "apiUrl": "/tplus/api/v2/saleDelivery/Query",
+                                "requestMethod": "POST",
+                                "requestBody": {"param": {}},
+                            }
+                        ]
+                    },
+                },
+                {
+                    "code": "0",
+                    "data": [{"field": "Code", "title": "单据编号"}],
+                },
+                {
+                    "code": "0",
+                    "data": [{"field": "Code", "title": "单据编号"}],
+                },
+            ]
+        )
+
+        result = client.safe_call_tplus_api_smart(
+            parent_code="t+xs",
+            module_code="saleDelivery",
+            api_name="列表查询",
+            biz_code="SA04",
+            filters={"不存在字段": "x"},
+        )
+
+        self.assertFalse(result["ok"])
+        self.assertEqual(result["error"]["code"], "invalid_argument")
+        self.assertIn("Unmatched filter fields", result["error"]["message"])
+
     def test_tool_error_envelope_from_value_error(self):
         client, _transport = self.make_client([])
 

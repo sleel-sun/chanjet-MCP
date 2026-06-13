@@ -15,6 +15,7 @@
 - 从官方接口文档生成可直接编辑的 MCP 调用模板。
 - 查询 T+ 单据类型 `bizCode` 和业务类型 `BusinessType` 对照表。
 - 查询 T+ 单据列表查询项字段和显示栏目字段。
+- 调用 T+ 接口前自动参考官方请求示例，并解析常见自然语言字段。
 - 通用调用任意 `/tplus/api/...` 业务接口，自动注入 `appKey`、`appSecret`、`openToken`。
 - 通用调用任意 HYC/ZPlus `/accounting/openapi/...` 业务接口，自动注入 `appKey`、`appSecret`、`openToken`。
 - 通用调用任意 HSY OpenAPI 业务接口，自动注入 `appKey`、`appSecret`、`openToken`。
@@ -404,6 +405,72 @@ Claude 示例：
 2. 显示栏目字段用于 `query_tplus_voucher_list.display_fields`。可以传中文名，工具会匹配成真实字段并注入 `body.param.selectFields`。
 3. 不知道 `biz_code` 时，先调用 `get_tplus_reference_codes` 查询单据类型编码。
 
+`call_tplus_api_smart`
+
+调用 T+ 接口前自动参考对应官方接口的请求示例，再合并自然语言字段和显式覆盖参数。适合“知道要调用哪个文档模块/接口，但希望服务端自动查编码、查字段、组装请求”的场景。
+
+必须提供官方文档定位参数：
+
+- `parent_code`
+- `module_code`
+- `api_name`
+
+工具会先调用 `get_api_call_template(product="tplus", ...)`，以官方请求示例作为基础请求；然后按需调用 `get_tplus_reference_codes` 和 `get_tplus_voucher_list_fields`。
+
+参数示例：
+
+```json
+{
+  "parent_code": "t+xs",
+  "module_code": "saleDelivery",
+  "api_name": "列表查询",
+  "voucher_name": "销货单",
+  "business_type_name": "采购退货",
+  "filters": {
+    "客户": "客户A"
+  },
+  "display_fields": ["单据编号", "金额"],
+  "body_overrides": {
+    "param": {
+      "pageSize": 50
+    }
+  },
+  "account_alias": "company-a"
+}
+```
+
+处理规则：
+
+1. `voucher_name` 会解析成 `biz_code`，例如 `销货单` -> `SA04`。
+2. `business_type_name` 会解析成 `BusinessType`，例如 `采购退货` -> `02`。
+3. `filters` 的中文键会按查询项字段匹配成真实字段，然后写入 `body.param`。
+4. `display_fields` 的中文栏目名会匹配成真实字段，然后写入 `body.param.selectFields`。
+5. `body_overrides` 最后合并，可覆盖官方示例或自动解析出的字段。
+6. 如果查询项或栏目项无法匹配，工具返回统一错误结构，不会静默调用错误请求。
+
+返回：
+
+```json
+{
+  "ok": true,
+  "data": {
+    "template": {},
+    "resolved": {
+      "biz_code": "SA04",
+      "business_type": "02",
+      "matched_filter_fields": [],
+      "matched_display_fields": []
+    },
+    "request": {
+      "path": "/tplus/api/v2/saleDelivery/Query",
+      "method": "POST",
+      "body": {}
+    },
+    "data": {}
+  }
+}
+```
+
 `call_api_template`
 
 根据官方文档模板自动选择对应产品调用工具。客户端只需要提供产品、模块编码、可选接口名和业务参数，不需要自己选择 `call_tplus_api` / `call_hyc_api` 等底层工具。
@@ -453,7 +520,7 @@ Claude 示例：
 }
 ```
 
-`diagnose_config`、`get_api_call_template`、`search_api_templates`、`get_tplus_reference_codes`、`get_tplus_voucher_list_fields` 和 `call_api_template` 使用统一错误结构：
+`diagnose_config`、`get_api_call_template`、`search_api_templates`、`get_tplus_reference_codes`、`get_tplus_voucher_list_fields`、`call_tplus_api_smart` 和 `call_api_template` 使用统一错误结构：
 
 ```json
 {

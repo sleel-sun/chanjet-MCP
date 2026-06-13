@@ -172,6 +172,47 @@ def call_api_template(
 
 
 @mcp.tool()
+def call_tplus_api_smart(
+    parent_code: str,
+    module_code: str,
+    api_name: str | None = None,
+    voucher_name: str | None = None,
+    biz_code: str | None = None,
+    business_type_name: str | None = None,
+    business_type: str | None = None,
+    filters: dict[str, Any] | None = None,
+    display_fields: list[str] | None = None,
+    body_overrides: dict[str, Any] | list[Any] | None = None,
+    query: dict[str, Any] | None = None,
+    headers: dict[str, str] | None = None,
+    account_alias: str | None = None,
+    method: str | None = None,
+) -> dict[str, Any]:
+    """Call a T+ API after consulting the official request example.
+
+    Use this for more automatic T+ calls. It first loads the matching official
+    API template, then resolves voucher_name, business_type_name, natural
+    language filter names, and display_fields before sending the request.
+    """
+    return client.safe_call_tplus_api_smart(
+        parent_code=parent_code,
+        module_code=module_code,
+        api_name=api_name,
+        voucher_name=voucher_name,
+        biz_code=biz_code,
+        business_type_name=business_type_name,
+        business_type=business_type,
+        filters=filters,
+        display_fields=display_fields,
+        body_overrides=body_overrides,
+        query=query,
+        headers=headers,
+        account_alias=account_alias,
+        method=method,
+    )
+
+
+@mcp.tool()
 def get_tplus_reference_codes(query: str | None = None) -> dict[str, Any]:
     """Return T+ voucher bizCode and BusinessType reference rows.
 
