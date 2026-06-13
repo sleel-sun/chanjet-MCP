@@ -613,6 +613,161 @@ class ChanjetTCloudClient:
             "data": response,
         }
 
+    def call_tplus_api_smart(
+        self,
+        parent_code: str,
+        module_code: str,
+        api_name: str | None = None,
+        *,
+        voucher_name: str | None = None,
+        biz_code: str | None = None,
+        business_type_name: str | None = None,
+        business_type: str | None = None,
+        filters: dict[str, Any] | None = None,
+        display_fields: list[str] | None = None,
+        body_overrides: Any = None,
+        query: dict[str, Any] | None = None,
+        headers: dict[str, str] | None = None,
+        account_alias: str | None = None,
+        method: str | None = None,
+    ) -> dict[str, Any]:
+        template_result = self.get_api_call_template(
+            product=TCLOUD_PRODUCT_CODE,
+            parent_code=parent_code,
+            module_code=module_code,
+            api_name=api_name,
+        )
+        if not template_result["templates"]:
+            raise ValueError("No API template matched the requested module and api_name")
+
+        template = template_result["templates"][0]
+        request_args = copy.deepcopy(template["arguments"])
+        if method is not None:
+            request_args["method"] = method
+        if query is not None:
+            request_args["query"] = query
+        if headers is not None:
+            request_args["headers"] = headers
+        if account_alias is not None:
+            request_args["account_alias"] = account_alias
+
+        body = copy.deepcopy(request_args.get("body"))
+        resolved_biz_code = biz_code
+        resolved_business_type = business_type
+        reference_lookup: dict[str, Any] | None = None
+
+        if voucher_name or business_type_name:
+            reference_lookup = self.get_tplus_reference_codes()
+        if not resolved_biz_code and voucher_name and reference_lookup is not None:
+            resolved_biz_code = self._resolve_reference_code(
+                reference_lookup["voucher_types"],
+                voucher_name,
+                label="voucher type",
+            )
+        if (
+            not resolved_business_type
+            and business_type_name
+            and reference_lookup is not None
+        ):
+            resolved_business_type = self._resolve_reference_code(
+                reference_lookup["business_types"],
+                business_type_name,
+                label="business type",
+            )
+
+        field_lookup: dict[str, Any] | None = None
+        if filters or display_fields:
+            if not resolved_biz_code:
+                raise ValueError(
+                    "biz_code or voucher_name is required to resolve filters or display_fields"
+                )
+            field_lookup = self.get_tplus_voucher_list_fields(
+                biz_code=resolved_biz_code,
+                headers=headers,
+                account_alias=account_alias,
+            )
+
+        matched_filter_fields: list[dict[str, str]] = []
+        matched_display_fields: list[dict[str, str]] = []
+        if filters:
+            body = self._ensure_param_body(body)
+            param = body["param"]
+            unmatched_filters: list[str] = []
+            for requested, value in filters.items():
+                requested_text = str(requested).strip()
+                match = self._find_display_field_match(
+                    requested_text,
+                    field_lookup["query_fields"] if field_lookup else [],
+                )
+                if match is None:
+                    unmatched_filters.append(requested_text)
+                    continue
+                field_name = str(match["field"])
+                param[field_name] = value
+                matched_filter_fields.append(
+                    {
+                        "requested": requested_text,
+                        "field": field_name,
+                        "label": str(match["label"]),
+                    }
+                )
+            if unmatched_filters:
+                raise ValueError(
+                    f"Unmatched filter fields: {', '.join(unmatched_filters)}"
+                )
+
+        if resolved_business_type:
+            body = self._ensure_param_body(body)
+            body["param"]["BusinessType"] = resolved_business_type
+
+        if display_fields:
+            matched_display_fields, unmatched_display_fields = self._match_display_fields(
+                display_fields,
+                field_lookup["display_fields"] if field_lookup else [],
+            )
+            if unmatched_display_fields:
+                raise ValueError(
+                    f"Unmatched display fields: {', '.join(unmatched_display_fields)}"
+                )
+            body = self._inject_display_fields(
+                body,
+                [field["field"] for field in matched_display_fields],
+            )
+
+        if body_overrides is not None:
+            body = self._deep_merge_values(body, body_overrides)
+        request_args["body"] = body
+
+        response = self.call_tplus_api(
+            path=request_args["path"],
+            method=request_args["method"],
+            body=request_args.get("body"),
+            query=request_args.get("query"),
+            headers=request_args.get("headers"),
+            account_alias=request_args.get("account_alias"),
+        )
+
+        resolved = {
+            "biz_code": resolved_biz_code,
+            "voucher_name": voucher_name,
+            "business_type": resolved_business_type,
+            "business_type_name": business_type_name,
+            "matched_filter_fields": matched_filter_fields,
+            "matched_display_fields": matched_display_fields,
+            "reference_source_docs": (
+                reference_lookup.get("source_docs") if reference_lookup else None
+            ),
+            "field_source_doc": (
+                field_lookup.get("source_doc") if field_lookup else None
+            ),
+        }
+        return {
+            "template": template,
+            "resolved": resolved,
+            "request": request_args,
+            "data": response,
+        }
+
     def safe_diagnose_config(self) -> dict[str, Any]:
         try:
             return self.tool_success(self.diagnose_config())
@@ -712,6 +867,46 @@ class ChanjetTCloudClient:
                     module_code=module_code,
                     api_name=api_name,
                     body=body,
+                    query=query,
+                    headers=headers,
+                    account_alias=account_alias,
+                    method=method,
+                )
+            )
+        except Exception as exc:
+            return self.tool_error(exc)
+
+    def safe_call_tplus_api_smart(
+        self,
+        parent_code: str,
+        module_code: str,
+        api_name: str | None = None,
+        *,
+        voucher_name: str | None = None,
+        biz_code: str | None = None,
+        business_type_name: str | None = None,
+        business_type: str | None = None,
+        filters: dict[str, Any] | None = None,
+        display_fields: list[str] | None = None,
+        body_overrides: Any = None,
+        query: dict[str, Any] | None = None,
+        headers: dict[str, str] | None = None,
+        account_alias: str | None = None,
+        method: str | None = None,
+    ) -> dict[str, Any]:
+        try:
+            return self.tool_success(
+                self.call_tplus_api_smart(
+                    parent_code=parent_code,
+                    module_code=module_code,
+                    api_name=api_name,
+                    voucher_name=voucher_name,
+                    biz_code=biz_code,
+                    business_type_name=business_type_name,
+                    business_type=business_type,
+                    filters=filters,
+                    display_fields=display_fields,
+                    body_overrides=body_overrides,
                     query=query,
                     headers=headers,
                     account_alias=account_alias,
@@ -1119,6 +1314,62 @@ class ChanjetTCloudClient:
                 account_alias=account_alias,
             )
         raise ValueError(f"Unsupported product code: {product_code}")
+
+    def _resolve_reference_code(
+        self,
+        rows: list[dict[str, Any]],
+        query: str,
+        *,
+        label: str,
+    ) -> str:
+        matches = self._filter_reference_code_rows(rows, query)
+        if not matches:
+            raise ValueError(f"Could not resolve {label}: {query}")
+
+        normalized_query = self._normalize_match_value(query)
+        exact_matches = [
+            row
+            for row in matches
+            if normalized_query
+            in {
+                self._normalize_match_value(row.get("code")),
+                self._normalize_match_value(row.get("name")),
+            }
+        ]
+        if len(exact_matches) == 1:
+            return str(exact_matches[0]["code"])
+        if len(matches) == 1:
+            return str(matches[0]["code"])
+
+        candidates = ", ".join(
+            f"{row.get('name')}={row.get('code')}" for row in matches[:5]
+        )
+        raise ValueError(f"Ambiguous {label}: {query}. Candidates: {candidates}")
+
+    def _ensure_param_body(self, body: Any) -> dict[str, Any]:
+        if body is None:
+            body = {}
+        if not isinstance(body, dict):
+            raise ValueError("Request body must be an object to inject smart fields")
+        copied_body = copy.deepcopy(body)
+        param = copied_body.get("param")
+        if param is None:
+            param = {}
+            copied_body["param"] = param
+        if not isinstance(param, dict):
+            raise ValueError("Request body param must be an object to inject smart fields")
+        return copied_body
+
+    def _deep_merge_values(self, base: Any, override: Any) -> Any:
+        if isinstance(base, dict) and isinstance(override, dict):
+            merged = copy.deepcopy(base)
+            for key, value in override.items():
+                if key in merged:
+                    merged[key] = self._deep_merge_values(merged[key], value)
+                else:
+                    merged[key] = copy.deepcopy(value)
+            return merged
+        return copy.deepcopy(override)
 
     def _config_issue(self, code: str, message: str, hint: str) -> dict[str, str]:
         return {"code": code, "message": message, "hint": hint}
