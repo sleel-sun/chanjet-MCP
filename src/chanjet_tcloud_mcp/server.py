@@ -142,6 +142,51 @@ def search_api_templates(
 
 
 @mcp.tool()
+def call_api_smart(
+    product: str,
+    parent_code: str,
+    module_code: str,
+    api_name: str | None = None,
+    fields: dict[str, Any] | None = None,
+    body_overrides: dict[str, Any] | list[Any] | None = None,
+    query: dict[str, Any] | None = None,
+    headers: dict[str, str] | None = None,
+    account_alias: str | None = None,
+    method: str | None = None,
+    voucher_name: str | None = None,
+    biz_code: str | None = None,
+    business_type_name: str | None = None,
+    business_type: str | None = None,
+    filters: dict[str, Any] | None = None,
+    display_fields: list[str] | None = None,
+) -> dict[str, Any]:
+    """Call any supported product API from the official template.
+
+    User-facing Chinese field names in fields are resolved to real API request
+    fields before the request is sent. T+ calls also support voucher/business
+    type and voucher list field resolution.
+    """
+    return client.safe_call_api_smart(
+        product=product,
+        parent_code=parent_code,
+        module_code=module_code,
+        api_name=api_name,
+        fields=fields,
+        body_overrides=body_overrides,
+        query=query,
+        headers=headers,
+        account_alias=account_alias,
+        method=method,
+        voucher_name=voucher_name,
+        biz_code=biz_code,
+        business_type_name=business_type_name,
+        business_type=business_type,
+        filters=filters,
+        display_fields=display_fields,
+    )
+
+
+@mcp.tool()
 def call_api_template(
     product: str,
     parent_code: str,

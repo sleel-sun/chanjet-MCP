@@ -119,6 +119,44 @@ API_BODY_KEYS = (
     "requestData",
 )
 API_QUERY_KEYS = ("query", "queryParams", "requestQuery", "urlParams")
+SMART_FIELD_NAME_KEYS = (
+    "field",
+    "fieldName",
+    "FieldName",
+    "name",
+    "paramName",
+    "parameterName",
+    "code",
+    "key",
+    "property",
+)
+SMART_FIELD_LABEL_KEYS = (
+    "label",
+    "title",
+    "caption",
+    "Caption",
+    "displayName",
+    "paramDesc",
+    "description",
+    "desc",
+    "name",
+    "fieldLabel",
+    "字段名称",
+    "字段名",
+    "名称",
+    "中文名称",
+)
+SMART_FIELD_CHILD_KEYS = (
+    "children",
+    "items",
+    "params",
+    "parameters",
+    "requestParams",
+    "requestParameters",
+    "fields",
+    "columns",
+    "properties",
+)
 
 
 class ChanjetApiError(RuntimeError):
@@ -613,26 +651,28 @@ class ChanjetTCloudClient:
             "data": response,
         }
 
-    def call_tplus_api_smart(
+    def call_api_smart(
         self,
+        product: str,
         parent_code: str,
         module_code: str,
         api_name: str | None = None,
         *,
+        fields: dict[str, Any] | None = None,
+        body_overrides: Any = None,
+        query: dict[str, Any] | None = None,
+        headers: dict[str, str] | None = None,
+        account_alias: str | None = None,
+        method: str | None = None,
         voucher_name: str | None = None,
         biz_code: str | None = None,
         business_type_name: str | None = None,
         business_type: str | None = None,
         filters: dict[str, Any] | None = None,
         display_fields: list[str] | None = None,
-        body_overrides: Any = None,
-        query: dict[str, Any] | None = None,
-        headers: dict[str, str] | None = None,
-        account_alias: str | None = None,
-        method: str | None = None,
     ) -> dict[str, Any]:
         template_result = self.get_api_call_template(
-            product=TCLOUD_PRODUCT_CODE,
+            product=product,
             parent_code=parent_code,
             module_code=module_code,
             api_name=api_name,
@@ -652,93 +692,39 @@ class ChanjetTCloudClient:
             request_args["account_alias"] = account_alias
 
         body = copy.deepcopy(request_args.get("body"))
-        resolved_biz_code = biz_code
-        resolved_business_type = business_type
-        reference_lookup: dict[str, Any] | None = None
-
-        if voucher_name or business_type_name:
-            reference_lookup = self.get_tplus_reference_codes()
-        if not resolved_biz_code and voucher_name and reference_lookup is not None:
-            resolved_biz_code = self._resolve_reference_code(
-                reference_lookup["voucher_types"],
-                voucher_name,
-                label="voucher type",
+        matched_fields: list[dict[str, Any]] = []
+        unmatched_fields: list[str] = []
+        if fields:
+            body, matched_fields, unmatched_fields = self._inject_smart_fields(
+                body,
+                fields,
+                template,
             )
-        if (
-            not resolved_business_type
-            and business_type_name
-            and reference_lookup is not None
-        ):
-            resolved_business_type = self._resolve_reference_code(
-                reference_lookup["business_types"],
-                business_type_name,
-                label="business type",
-            )
-
-        field_lookup: dict[str, Any] | None = None
-        if filters or display_fields:
-            if not resolved_biz_code:
+            if unmatched_fields:
                 raise ValueError(
-                    "biz_code or voucher_name is required to resolve filters or display_fields"
+                    f"Unmatched smart fields: {', '.join(unmatched_fields)}"
                 )
-            field_lookup = self.get_tplus_voucher_list_fields(
-                biz_code=resolved_biz_code,
+
+        tplus_resolved: dict[str, Any] = {}
+        if template_result["product"]["code"] == TCLOUD_PRODUCT_CODE:
+            body, tplus_resolved = self._apply_tplus_smart_fields(
+                body=body,
+                voucher_name=voucher_name,
+                biz_code=biz_code,
+                business_type_name=business_type_name,
+                business_type=business_type,
+                filters=filters,
+                display_fields=display_fields,
                 headers=headers,
                 account_alias=account_alias,
-            )
-
-        matched_filter_fields: list[dict[str, str]] = []
-        matched_display_fields: list[dict[str, str]] = []
-        if filters:
-            body = self._ensure_param_body(body)
-            param = body["param"]
-            unmatched_filters: list[str] = []
-            for requested, value in filters.items():
-                requested_text = str(requested).strip()
-                match = self._find_display_field_match(
-                    requested_text,
-                    field_lookup["query_fields"] if field_lookup else [],
-                )
-                if match is None:
-                    unmatched_filters.append(requested_text)
-                    continue
-                field_name = str(match["field"])
-                param[field_name] = value
-                matched_filter_fields.append(
-                    {
-                        "requested": requested_text,
-                        "field": field_name,
-                        "label": str(match["label"]),
-                    }
-                )
-            if unmatched_filters:
-                raise ValueError(
-                    f"Unmatched filter fields: {', '.join(unmatched_filters)}"
-                )
-
-        if resolved_business_type:
-            body = self._ensure_param_body(body)
-            body["param"]["BusinessType"] = resolved_business_type
-
-        if display_fields:
-            matched_display_fields, unmatched_display_fields = self._match_display_fields(
-                display_fields,
-                field_lookup["display_fields"] if field_lookup else [],
-            )
-            if unmatched_display_fields:
-                raise ValueError(
-                    f"Unmatched display fields: {', '.join(unmatched_display_fields)}"
-                )
-            body = self._inject_display_fields(
-                body,
-                [field["field"] for field in matched_display_fields],
             )
 
         if body_overrides is not None:
             body = self._deep_merge_values(body, body_overrides)
         request_args["body"] = body
 
-        response = self.call_tplus_api(
+        response = self._call_api_by_product(
+            template_result["product"]["code"],
             path=request_args["path"],
             method=request_args["method"],
             body=request_args.get("body"),
@@ -748,25 +734,53 @@ class ChanjetTCloudClient:
         )
 
         resolved = {
-            "biz_code": resolved_biz_code,
-            "voucher_name": voucher_name,
-            "business_type": resolved_business_type,
-            "business_type_name": business_type_name,
-            "matched_filter_fields": matched_filter_fields,
-            "matched_display_fields": matched_display_fields,
-            "reference_source_docs": (
-                reference_lookup.get("source_docs") if reference_lookup else None
-            ),
-            "field_source_doc": (
-                field_lookup.get("source_doc") if field_lookup else None
-            ),
+            "product_code": template_result["product"]["code"],
+            "matched_fields": matched_fields,
+            "unmatched_fields": unmatched_fields,
         }
+        resolved.update(tplus_resolved)
         return {
             "template": template,
             "resolved": resolved,
             "request": request_args,
             "data": response,
         }
+
+    def call_tplus_api_smart(
+        self,
+        parent_code: str,
+        module_code: str,
+        api_name: str | None = None,
+        *,
+        voucher_name: str | None = None,
+        biz_code: str | None = None,
+        business_type_name: str | None = None,
+        business_type: str | None = None,
+        filters: dict[str, Any] | None = None,
+        display_fields: list[str] | None = None,
+        body_overrides: Any = None,
+        query: dict[str, Any] | None = None,
+        headers: dict[str, str] | None = None,
+        account_alias: str | None = None,
+        method: str | None = None,
+    ) -> dict[str, Any]:
+        return self.call_api_smart(
+            product=TCLOUD_PRODUCT_CODE,
+            parent_code=parent_code,
+            module_code=module_code,
+            api_name=api_name,
+            body_overrides=body_overrides,
+            query=query,
+            headers=headers,
+            account_alias=account_alias,
+            method=method,
+            voucher_name=voucher_name,
+            biz_code=biz_code,
+            business_type_name=business_type_name,
+            business_type=business_type,
+            filters=filters,
+            display_fields=display_fields,
+        )
 
     def safe_diagnose_config(self) -> dict[str, Any]:
         try:
@@ -875,6 +889,56 @@ class ChanjetTCloudClient:
             )
         except Exception as exc:
             return self.tool_error(exc)
+
+    def safe_call_api_smart(
+        self,
+        product: str,
+        parent_code: str,
+        module_code: str,
+        api_name: str | None = None,
+        *,
+        fields: dict[str, Any] | None = None,
+        body_overrides: Any = None,
+        query: dict[str, Any] | None = None,
+        headers: dict[str, str] | None = None,
+        account_alias: str | None = None,
+        method: str | None = None,
+        voucher_name: str | None = None,
+        biz_code: str | None = None,
+        business_type_name: str | None = None,
+        business_type: str | None = None,
+        filters: dict[str, Any] | None = None,
+        display_fields: list[str] | None = None,
+    ) -> dict[str, Any]:
+        try:
+            return self.tool_success(
+                self.call_api_smart(
+                    product=product,
+                    parent_code=parent_code,
+                    module_code=module_code,
+                    api_name=api_name,
+                    fields=fields,
+                    body_overrides=body_overrides,
+                    query=query,
+                    headers=headers,
+                    account_alias=account_alias,
+                    method=method,
+                    voucher_name=voucher_name,
+                    biz_code=biz_code,
+                    business_type_name=business_type_name,
+                    business_type=business_type,
+                    filters=filters,
+                    display_fields=display_fields,
+                )
+            )
+        except Exception as exc:
+            return self.tool_error(
+                exc,
+                hint=(
+                    "Use exact API field names or call get_api_call_template/"
+                    "search_api_templates to inspect available fields."
+                ),
+            )
 
     def safe_call_tplus_api_smart(
         self,
@@ -1371,6 +1435,214 @@ class ChanjetTCloudClient:
             return merged
         return copy.deepcopy(override)
 
+    def _apply_tplus_smart_fields(
+        self,
+        *,
+        body: Any,
+        voucher_name: str | None,
+        biz_code: str | None,
+        business_type_name: str | None,
+        business_type: str | None,
+        filters: dict[str, Any] | None,
+        display_fields: list[str] | None,
+        headers: dict[str, str] | None,
+        account_alias: str | None,
+    ) -> tuple[Any, dict[str, Any]]:
+        resolved_biz_code = biz_code
+        resolved_business_type = business_type
+        reference_lookup: dict[str, Any] | None = None
+
+        if voucher_name or business_type_name:
+            reference_lookup = self.get_tplus_reference_codes()
+        if not resolved_biz_code and voucher_name and reference_lookup is not None:
+            resolved_biz_code = self._resolve_reference_code(
+                reference_lookup["voucher_types"],
+                voucher_name,
+                label="voucher type",
+            )
+        if (
+            not resolved_business_type
+            and business_type_name
+            and reference_lookup is not None
+        ):
+            resolved_business_type = self._resolve_reference_code(
+                reference_lookup["business_types"],
+                business_type_name,
+                label="business type",
+            )
+
+        field_lookup: dict[str, Any] | None = None
+        if filters or display_fields:
+            if not resolved_biz_code:
+                raise ValueError(
+                    "biz_code or voucher_name is required to resolve filters or display_fields"
+                )
+            field_lookup = self.get_tplus_voucher_list_fields(
+                biz_code=resolved_biz_code,
+                headers=headers,
+                account_alias=account_alias,
+            )
+
+        matched_filter_fields: list[dict[str, str]] = []
+        matched_display_fields: list[dict[str, str]] = []
+        if filters:
+            body = self._ensure_param_body(body)
+            param = body["param"]
+            unmatched_filters: list[str] = []
+            for requested, value in filters.items():
+                requested_text = str(requested).strip()
+                match = self._find_display_field_match(
+                    requested_text,
+                    field_lookup["query_fields"] if field_lookup else [],
+                )
+                if match is None:
+                    unmatched_filters.append(requested_text)
+                    continue
+                field_name = str(match["field"])
+                param[field_name] = value
+                matched_filter_fields.append(
+                    {
+                        "requested": requested_text,
+                        "field": field_name,
+                        "label": str(match["label"]),
+                    }
+                )
+            if unmatched_filters:
+                raise ValueError(
+                    f"Unmatched filter fields: {', '.join(unmatched_filters)}"
+                )
+
+        if resolved_business_type:
+            body = self._ensure_param_body(body)
+            body["param"]["BusinessType"] = resolved_business_type
+
+        if display_fields:
+            matched_display_fields, unmatched_display_fields = self._match_display_fields(
+                display_fields,
+                field_lookup["display_fields"] if field_lookup else [],
+            )
+            if unmatched_display_fields:
+                raise ValueError(
+                    f"Unmatched display fields: {', '.join(unmatched_display_fields)}"
+                )
+            body = self._inject_display_fields(
+                body,
+                [field["field"] for field in matched_display_fields],
+            )
+
+        return body, {
+            "biz_code": resolved_biz_code,
+            "voucher_name": voucher_name,
+            "business_type": resolved_business_type,
+            "business_type_name": business_type_name,
+            "matched_filter_fields": matched_filter_fields,
+            "matched_display_fields": matched_display_fields,
+            "reference_source_docs": (
+                reference_lookup.get("source_docs") if reference_lookup else None
+            ),
+            "field_source_doc": (
+                field_lookup.get("source_doc") if field_lookup else None
+            ),
+        }
+
+    def _inject_smart_fields(
+        self,
+        body: Any,
+        fields: dict[str, Any],
+        template: dict[str, Any],
+    ) -> tuple[Any, list[dict[str, Any]], list[str]]:
+        if body is None:
+            body = {}
+        if not isinstance(body, dict):
+            raise ValueError("Request body must be an object to inject smart fields")
+        updated_body = copy.deepcopy(body)
+        aliases = self._smart_field_aliases(template)
+        matched_fields: list[dict[str, Any]] = []
+        unmatched_fields: list[str] = []
+
+        for requested, value in fields.items():
+            requested_text = str(requested).strip()
+            normalized = self._normalize_match_value(requested_text)
+            match = aliases.get(normalized)
+            if match is None:
+                unmatched_fields.append(requested_text)
+                continue
+            self._set_body_path(updated_body, match["path"], value)
+            matched_fields.append(
+                {
+                    "requested": requested_text,
+                    "field": match["field"],
+                    "path": match["path"],
+                }
+            )
+
+        return updated_body, matched_fields, unmatched_fields
+
+    def _smart_field_aliases(self, template: dict[str, Any]) -> dict[str, dict[str, Any]]:
+        aliases: dict[str, dict[str, Any]] = {}
+
+        def register(path: list[str], field: str, labels: list[Any]) -> None:
+            if not path or not field:
+                return
+            match = {"field": field, "path": path}
+            for label in [field, *labels]:
+                normalized = self._normalize_match_value(label)
+                if normalized and normalized not in aliases:
+                    aliases[normalized] = match
+
+        def collect(item: Any, current_path: list[str] | None = None) -> None:
+            current_path = current_path or []
+            if isinstance(item, list):
+                for child in item:
+                    collect(child, current_path)
+                return
+            if not isinstance(item, dict):
+                return
+
+            field = self._first_mapping_value(item, SMART_FIELD_NAME_KEYS)
+            labels = [
+                value
+                for key in SMART_FIELD_LABEL_KEYS
+                for value in [item.get(key)]
+                if value is not None
+            ]
+            if field is not None:
+                field_text = str(field).strip()
+                path = [*current_path, field_text] if current_path else [field_text]
+                register(path, field_text, labels)
+
+            for key, value in item.items():
+                if key in SMART_FIELD_CHILD_KEYS:
+                    collect(value, current_path)
+                elif isinstance(value, dict):
+                    collect(value, current_path)
+                elif isinstance(value, list):
+                    collect(value, current_path)
+
+        collect(template.get("raw", template))
+        body = template.get("body")
+        if isinstance(body, dict):
+            default_parent = ["param"] if isinstance(body.get("param"), dict) else []
+            for key in body.get("param", body).keys():
+                field_path = [*default_parent, str(key)]
+                register(field_path, str(key), [])
+        return aliases
+
+    def _set_body_path(
+        self,
+        body: dict[str, Any],
+        path: list[str],
+        value: Any,
+    ) -> None:
+        target = body
+        for key in path[:-1]:
+            next_value = target.get(key)
+            if not isinstance(next_value, dict):
+                next_value = {}
+                target[key] = next_value
+            target = next_value
+        target[path[-1]] = value
+
     def _config_issue(self, code: str, message: str, hint: str) -> dict[str, str]:
         return {"code": code, "message": message, "hint": hint}
 
@@ -1468,6 +1740,7 @@ class ChanjetTCloudClient:
             "headers": copy.deepcopy(headers),
             "tool": product_metadata["tool"],
             "arguments": arguments,
+            "raw": copy.deepcopy(entry),
         }
 
     def _normalize_api_path(self, value: Any) -> str | None:
