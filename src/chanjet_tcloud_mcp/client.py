@@ -1553,9 +1553,23 @@ class ChanjetTCloudClient:
     ) -> tuple[Any, list[dict[str, Any]], list[str]]:
         if body is None:
             body = {}
-        if not isinstance(body, dict):
-            raise ValueError("Request body must be an object to inject smart fields")
         updated_body = copy.deepcopy(body)
+        path_prefix: list[Any] = []
+        if isinstance(updated_body, dict):
+            injection_body = updated_body
+        elif isinstance(updated_body, list):
+            if not updated_body:
+                updated_body.append({})
+            if not isinstance(updated_body[0], dict):
+                raise ValueError(
+                    "Request body array first item must be an object to inject smart fields"
+                )
+            injection_body = updated_body[0]
+            path_prefix = [0]
+        else:
+            raise ValueError(
+                "Request body must be an object or object array to inject smart fields"
+            )
         aliases = self._smart_field_aliases(template)
         matched_fields: list[dict[str, Any]] = []
         unmatched_fields: list[str] = []
@@ -1567,12 +1581,12 @@ class ChanjetTCloudClient:
             if match is None:
                 unmatched_fields.append(requested_text)
                 continue
-            self._set_body_path(updated_body, match["path"], value)
+            self._set_body_path(injection_body, match["path"], value)
             matched_fields.append(
                 {
                     "requested": requested_text,
                     "field": match["field"],
-                    "path": match["path"],
+                    "path": [*path_prefix, *match["path"]],
                 }
             )
 
@@ -1626,6 +1640,13 @@ class ChanjetTCloudClient:
             for key in body.get("param", body).keys():
                 field_path = [*default_parent, str(key)]
                 register(field_path, str(key), [])
+        elif (
+            isinstance(body, list)
+            and body
+            and isinstance(body[0], dict)
+        ):
+            for key in body[0].keys():
+                register([str(key)], str(key), [])
         return aliases
 
     def _set_body_path(

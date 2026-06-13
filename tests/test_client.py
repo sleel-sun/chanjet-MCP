@@ -1513,6 +1513,63 @@ class ClientTests(unittest.TestCase):
             "https://openapi.chanjet.com/accounting/document/customer/create/123",
         )
 
+    def test_call_api_smart_injects_fields_into_array_template_item(self):
+        client, transport = self.make_client(
+            [
+                {
+                    "result": True,
+                    "error": None,
+                    "value": {
+                        "documentApiInfoList": [
+                            {
+                                "apiName": "仓库批量保存",
+                                "apiUrl": "/accounting/document/integration/warehouse/batchUpsertt/123",
+                                "requestMethod": "POST",
+                                "requestBody": [
+                                    {
+                                        "code": "",
+                                        "name": "",
+                                        "statusEnum": "A",
+                                    }
+                                ],
+                                "requestParams": [
+                                    {"field": "code", "name": "仓库编码"},
+                                    {"field": "name", "name": "仓库名称"},
+                                    {"field": "statusEnum", "name": "状态"},
+                                ],
+                            }
+                        ],
+                    },
+                },
+                {"successResultMap": {"WH001": "123"}, "failResultMap": {}},
+            ]
+        )
+
+        result = client.call_api_smart(
+            product="hkj",
+            parent_code="jcda",
+            module_code="ck",
+            api_name="批量保存",
+            fields={"仓库编码": "WH001", "仓库名称": "上海仓"},
+        )
+
+        expected_body = [
+            {
+                "code": "WH001",
+                "name": "上海仓",
+                "statusEnum": "A",
+            }
+        ]
+        self.assertEqual(result["request"]["body"], expected_body)
+        self.assertEqual(transport.calls[1]["json_body"], expected_body)
+        self.assertEqual(
+            result["resolved"]["matched_fields"],
+            [
+                {"requested": "仓库编码", "field": "code", "path": [0, "code"]},
+                {"requested": "仓库名称", "field": "name", "path": [0, "name"]},
+            ],
+        )
+
     def test_safe_call_api_smart_wraps_unmatched_chinese_field(self):
         client, transport = self.make_client(
             [
