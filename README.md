@@ -156,9 +156,9 @@ Claude 示例：
 
 1. 调用 `diagnose_config` 确认配置和账号状态。
 2. 调用 `search_api_templates` 用中文业务词直接查找可调用模板。
-3. 调用 `call_api_template` 按模板自动路由到对应产品接口。
+3. 调用 `call_api_smart` 按官方模板自动解析中文字段并路由到对应产品接口。
 
-如果客户端需要更细控制，也可以继续使用旧流程：先调用 `search_*_docs` 找模块，再调用 `get_api_call_template` 生成模板，最后按模板调用 `call_tplus_api`、`call_hyc_api`、`call_hsy_api`、`call_ydz_api` 或 `call_hkj_api`。
+如果客户端需要更细控制，也可以继续使用旧流程：先调用 `search_*_docs` 找模块，再调用 `get_api_call_template` 生成模板，最后按模板调用 `call_api_template`、`call_tplus_api`、`call_hyc_api`、`call_hsy_api`、`call_ydz_api` 或 `call_hkj_api`。
 
 `diagnose_config`
 
@@ -405,6 +405,67 @@ Claude 示例：
 2. 显示栏目字段用于 `query_tplus_voucher_list.display_fields`。可以传中文名，工具会匹配成真实字段并注入 `body.param.selectFields`。
 3. 不知道 `biz_code` 时，先调用 `get_tplus_reference_codes` 查询单据类型编码。
 
+`call_api_smart`
+
+推荐优先使用的智能调用工具，支持 T+Cloud、HYC/ZPlus、HSY、YDZ/Finance 和 HKJ/Accounting。它会先读取官方接口模板，再把用户传入的中文字段解析成真实接口字段，最后自动路由到对应产品接口。解析不到字段时返回统一错误结构，不会静默调用错误请求。
+
+参数示例：
+
+```json
+{
+  "product": "hyc",
+  "parent_code": "zjjcda",
+  "module_code": "ck",
+  "api_name": "新增",
+  "fields": {
+    "仓库编码": "WH001",
+    "仓库名称": "上海仓"
+  },
+  "body_overrides": {
+    "statusEnum": "A"
+  },
+  "account_alias": "company-a"
+}
+```
+
+处理规则：
+
+1. `fields` 的键可以是官方文档中的中文字段名，例如 `仓库编码`。
+2. 工具会先从官方接口字段说明解析中文字段；如果文档没有字段说明，则使用官方请求示例里的真实字段名做精确匹配 fallback。
+3. 解析后的字段会写入请求体。如果官方示例包含 `param` 对象，则默认写入 `body.param`；否则写入请求体顶层。
+4. `body_overrides` 最后深度合并，显式覆盖自动解析出的字段。
+5. T+ 接口还支持 `voucher_name`、`business_type_name`、`filters` 和 `display_fields`，用于自动解析单据类型、业务类型、查询项和显示栏目。
+
+返回：
+
+```json
+{
+  "ok": true,
+  "data": {
+    "template": {},
+    "resolved": {
+      "product_code": "zplus",
+      "matched_fields": [
+        {
+          "requested": "仓库编码",
+          "field": "code",
+          "path": ["code"]
+        }
+      ],
+      "unmatched_fields": []
+    },
+    "request": {
+      "path": "/accounting/openapi/cc/warehouse/create/123",
+      "method": "POST",
+      "body": {
+        "code": "WH001"
+      }
+    },
+    "data": {}
+  }
+}
+```
+
 `call_tplus_api_smart`
 
 调用 T+ 接口前自动参考对应官方接口的请求示例，再合并自然语言字段和显式覆盖参数。适合“知道要调用哪个文档模块/接口，但希望服务端自动查编码、查字段、组装请求”的场景。
@@ -520,7 +581,7 @@ Claude 示例：
 }
 ```
 
-`diagnose_config`、`get_api_call_template`、`search_api_templates`、`get_tplus_reference_codes`、`get_tplus_voucher_list_fields`、`call_tplus_api_smart` 和 `call_api_template` 使用统一错误结构：
+`diagnose_config`、`get_api_call_template`、`search_api_templates`、`get_tplus_reference_codes`、`get_tplus_voucher_list_fields`、`call_api_smart`、`call_tplus_api_smart` 和 `call_api_template` 使用统一错误结构：
 
 ```json
 {
