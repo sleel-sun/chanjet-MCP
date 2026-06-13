@@ -1392,6 +1392,127 @@ class ClientTests(unittest.TestCase):
             {"param": {"Code": "01"}},
         )
 
+    def test_call_api_smart_resolves_chinese_fields_for_hyc_template(self):
+        client, transport = self.make_client(
+            [
+                {
+                    "result": True,
+                    "error": None,
+                    "value": {
+                        "modulePath": "好业财 / 基础档案 / 仓库",
+                        "moduleName": "仓库",
+                        "documentApiInfoList": [
+                            {
+                                "apiName": "仓库新增",
+                                "apiUrl": "/accounting/openapi/cc/warehouse/create/123",
+                                "requestMethod": "POST",
+                                "requestBody": {
+                                    "code": "",
+                                    "name": "",
+                                    "statusEnum": "A",
+                                },
+                                "requestParams": [
+                                    {"field": "code", "name": "仓库编码"},
+                                    {"field": "name", "name": "仓库名称"},
+                                    {"field": "statusEnum", "name": "状态"},
+                                ],
+                            }
+                        ],
+                    },
+                },
+                {"code": "0", "data": {"id": "WH001"}},
+            ]
+        )
+
+        result = client.call_api_smart(
+            product="hyc",
+            parent_code="zjjcda",
+            module_code="ck",
+            api_name="新增",
+            fields={"仓库编码": "WH001", "仓库名称": "上海仓"},
+            body_overrides={"statusEnum": "A"},
+        )
+
+        self.assertEqual(result["template"]["api_name"], "仓库新增")
+        self.assertEqual(result["resolved"]["product_code"], "zplus")
+        self.assertEqual(
+            result["resolved"]["matched_fields"],
+            [
+                {"requested": "仓库编码", "field": "code", "path": ["code"]},
+                {"requested": "仓库名称", "field": "name", "path": ["name"]},
+            ],
+        )
+        self.assertEqual(result["resolved"]["unmatched_fields"], [])
+        self.assertEqual(
+            result["request"]["body"],
+            {"code": "WH001", "name": "上海仓", "statusEnum": "A"},
+        )
+        self.assertEqual(
+            transport.calls[1]["url"],
+            "https://openapi.chanjet.com/accounting/openapi/cc/warehouse/create/123",
+        )
+        self.assertEqual(
+            transport.calls[1]["json_body"],
+            {"code": "WH001", "name": "上海仓", "statusEnum": "A"},
+        )
+        self.assertEqual(result["data"], {"code": "0", "data": {"id": "WH001"}})
+
+    def test_call_api_smart_uses_exact_field_name_fallback(self):
+        client, transport = self.make_client(
+            [
+                {
+                    "result": True,
+                    "error": None,
+                    "value": {
+                        "documentApiInfoList": [
+                            {
+                                "apiName": "客户新增",
+                                "apiUrl": "/accounting/document/customer/create/123",
+                                "requestMethod": "POST",
+                                "requestBody": {
+                                    "customerCode": "",
+                                    "customerName": "",
+                                },
+                            }
+                        ],
+                    },
+                },
+                {"code": "0", "data": {"id": "C001"}},
+            ]
+        )
+
+        result = client.call_api_smart(
+            product="hkj",
+            parent_code="jcda",
+            module_code="customer",
+            api_name="新增",
+            fields={"customerCode": "C001", "customerName": "客户A"},
+        )
+
+        self.assertEqual(
+            result["request"]["body"],
+            {"customerCode": "C001", "customerName": "客户A"},
+        )
+        self.assertEqual(
+            result["resolved"]["matched_fields"],
+            [
+                {
+                    "requested": "customerCode",
+                    "field": "customerCode",
+                    "path": ["customerCode"],
+                },
+                {
+                    "requested": "customerName",
+                    "field": "customerName",
+                    "path": ["customerName"],
+                },
+            ],
+        )
+        self.assertEqual(
+            transport.calls[1]["url"],
+            "https://openapi.chanjet.com/accounting/document/customer/create/123",
+        )
+
     def test_call_tplus_api_smart_uses_template_and_resolves_natural_inputs(self):
         client, transport = self.make_client(
             [
