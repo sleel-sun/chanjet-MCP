@@ -1513,6 +1513,44 @@ class ClientTests(unittest.TestCase):
             "https://openapi.chanjet.com/accounting/document/customer/create/123",
         )
 
+    def test_safe_call_api_smart_wraps_unmatched_chinese_field(self):
+        client, transport = self.make_client(
+            [
+                {
+                    "result": True,
+                    "error": None,
+                    "value": {
+                        "documentApiInfoList": [
+                            {
+                                "apiName": "仓库新增",
+                                "apiUrl": "/accounting/openapi/cc/warehouse/create/123",
+                                "requestMethod": "POST",
+                                "requestBody": {"code": ""},
+                                "requestParams": [
+                                    {"field": "code", "name": "仓库编码"},
+                                ],
+                            }
+                        ],
+                    },
+                }
+            ]
+        )
+
+        result = client.safe_call_api_smart(
+            product="hyc",
+            parent_code="zjjcda",
+            module_code="ck",
+            api_name="新增",
+            fields={"不存在字段": "x"},
+        )
+
+        self.assertFalse(result["ok"])
+        self.assertEqual(result["error"]["code"], "invalid_argument")
+        self.assertIn("Unmatched smart fields", result["error"]["message"])
+        self.assertIn("不存在字段", result["error"]["message"])
+        self.assertIn("get_api_call_template", result["error"]["hint"])
+        self.assertEqual(len(transport.calls), 1)
+
     def test_call_tplus_api_smart_uses_template_and_resolves_natural_inputs(self):
         client, transport = self.make_client(
             [
