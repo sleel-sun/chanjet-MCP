@@ -1551,6 +1551,75 @@ class ClientTests(unittest.TestCase):
         self.assertIn("get_api_call_template", result["error"]["hint"])
         self.assertEqual(len(transport.calls), 1)
 
+    def test_call_api_smart_preserves_tplus_natural_input_resolution(self):
+        client, transport = self.make_client(
+            [
+                {
+                    "result": True,
+                    "error": None,
+                    "value": {
+                        "modulePath": "T+Cloud / 销售 / 销货单列表",
+                        "moduleName": "销货单列表",
+                        "documentApiInfoList": [
+                            {
+                                "apiName": "销货单列表查询",
+                                "apiUrl": "/tplus/api/v2/saleDelivery/Query",
+                                "requestMethod": "POST",
+                                "requestBody": {"param": {"pageIndex": 1}},
+                            }
+                        ],
+                    },
+                },
+                {
+                    "result": True,
+                    "error": None,
+                    "value": {"rows": [{"code": "SA04", "name": "销货单"}]},
+                },
+                {
+                    "result": True,
+                    "error": None,
+                    "value": {"rows": [{"code": "02", "name": "采购退货"}]},
+                },
+                {
+                    "code": "0",
+                    "data": {"items": [{"FieldName": "CustomerName", "Caption": "客户"}]},
+                },
+                {
+                    "code": "0",
+                    "data": {"columns": [{"FieldName": "Code", "Caption": "单据编号"}]},
+                },
+                {"code": "0", "data": [{"Code": "SA-001"}]},
+            ]
+        )
+
+        result = client.call_api_smart(
+            product="tplus",
+            parent_code="t+xs",
+            module_code="saleDelivery",
+            api_name="列表查询",
+            voucher_name="销货单",
+            business_type_name="采购退货",
+            filters={"客户": "客户A"},
+            display_fields=["单据编号"],
+            body_overrides={"param": {"pageSize": 10}},
+        )
+
+        self.assertEqual(
+            transport.calls[5]["json_body"],
+            {
+                "param": {
+                    "pageIndex": 1,
+                    "BusinessType": "02",
+                    "CustomerName": "客户A",
+                    "selectFields": ["Code"],
+                    "pageSize": 10,
+                }
+            },
+        )
+        self.assertEqual(result["resolved"]["product_code"], "tcloud")
+        self.assertEqual(result["resolved"]["biz_code"], "SA04")
+        self.assertEqual(result["resolved"]["business_type"], "02")
+
     def test_call_tplus_api_smart_uses_template_and_resolves_natural_inputs(self):
         client, transport = self.make_client(
             [
