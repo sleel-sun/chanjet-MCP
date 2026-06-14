@@ -1793,6 +1793,182 @@ class ClientTests(unittest.TestCase):
         )
         self.assertEqual(result["data"], {"code": "0", "data": [{"Code": "SA-001", "Amount": 100}]})
 
+    def test_query_tplus_voucher_list_smart_resolves_template_and_generates_body(self):
+        client, transport = self.make_client(
+            [
+                {
+                    "result": True,
+                    "error": None,
+                    "value": {"rows": [{"code": "SA04", "name": "销货单"}]},
+                },
+                {"result": True, "error": None, "value": {"rows": []}},
+                {
+                    "result": True,
+                    "error": None,
+                    "value": {"productCode": "tcloud", "children": []},
+                },
+                {
+                    "result": True,
+                    "error": None,
+                    "value": {"productCode": "tcloud", "children": []},
+                },
+                {
+                    "result": True,
+                    "error": None,
+                    "value": {
+                        "productCode": "tcloud",
+                        "children": [
+                            {
+                                "moduleCode": "t+sc",
+                                "moduleName": "生产管理",
+                                "children": [
+                                    {
+                                        "moduleCode": "manufactureOrder",
+                                        "moduleName": "生产加工单",
+                                    }
+                                ],
+                            }
+                        ],
+                    },
+                },
+                {
+                    "result": True,
+                    "error": None,
+                    "value": {
+                        "modulePath": "T+Cloud / 生产管理 / 生产加工单",
+                        "moduleName": "生产加工单",
+                        "documentApiInfoList": [
+                            {
+                                "apiName": "生产加工单列表查询",
+                                "apiUrl": "/tplus/api/v2/ManufactureOrderOpenApi/FindVoucherList",
+                                "requestMethod": "POST",
+                                "requestBody": {"param": {}},
+                            }
+                        ],
+                    },
+                },
+                {
+                    "code": "0",
+                    "data": {
+                        "items": [
+                            {"FieldName": "Code", "Caption": "单据编号"},
+                            {"FieldName": "VoucherDate", "Caption": "单据日期"},
+                        ]
+                    },
+                },
+                {
+                    "code": "0",
+                    "data": {
+                        "columns": [
+                            {"FieldName": "Code", "Caption": "单据编号"},
+                            {"FieldName": "Quantity", "Caption": "数量"},
+                        ]
+                    },
+                },
+                {"code": "0", "data": [{"Code": "MO-001", "Quantity": 3}]},
+            ]
+        )
+
+        result = client.query_tplus_voucher_list_smart(
+            voucher_name="生产加工单",
+            intent="查询所有",
+            module_code="ManufactureOrderOpenApi",
+            filters={"单据编号": "MO-001"},
+            display_fields=["单据编号", "数量"],
+            page_size=50,
+            page_index=2,
+            body_overrides={"param": {"paramDic": {"extra": "x"}}},
+        )
+
+        self.assertEqual(result["resolved"]["biz_code"], "MP05")
+        self.assertEqual(result["resolved"]["biz_code_source"], "fallback")
+        self.assertEqual(result["template"]["api_name"], "生产加工单列表查询")
+        self.assertEqual(
+            result["request"]["path"],
+            "/tplus/api/v2/ManufactureOrderOpenApi/FindVoucherList",
+        )
+        self.assertEqual(
+            transport.calls[8]["json_body"],
+            {
+                "param": {
+                    "pageSize": 50,
+                    "pageIndex": 2,
+                    "paramDic": {"Code": "MO-001", "extra": "x"},
+                    "selectFields": ["Code", "Quantity"],
+                }
+            },
+        )
+        self.assertEqual(
+            result["resolved"]["matched_filter_fields"],
+            [{"requested": "单据编号", "field": "Code", "label": "单据编号"}],
+        )
+        self.assertEqual(
+            result["resolved"]["matched_display_fields"],
+            [
+                {"requested": "单据编号", "field": "Code", "label": "单据编号"},
+                {"requested": "数量", "field": "Quantity", "label": "数量"},
+            ],
+        )
+        self.assertEqual(
+            result["resolved"]["compatibility"],
+            [
+                {
+                    "input": "ManufactureOrderOpenApi",
+                    "decision": "ignored_module_code_alias",
+                    "reason": "module_code looks like an API implementation alias, so voucher_name search was used",
+                }
+            ],
+        )
+        self.assertEqual(
+            [call["url"] for call in transport.calls],
+            [
+                "https://openapi.chanjet.com/developer/api/doc-center/details/tcloud/t%2Bxdescription/t%2Bvouchertype",
+                "https://openapi.chanjet.com/developer/api/doc-center/details/tcloud/t%2Bxdescription/t%2Bbusitype",
+                "https://openapi.chanjet.com/developer/api/doc-center/modulesNameByCode/tcloud",
+                "https://openapi.chanjet.com/developer/api/doc-center/modulesNameByCode/tcloud",
+                "https://openapi.chanjet.com/developer/api/doc-center/modulesNameByCode/tcloud",
+                "https://openapi.chanjet.com/developer/api/doc-center/details/tcloud/t%2Bsc/manufactureOrder",
+                "https://openapi.chanjet.com/tplus/api/v2/VoucherAPIService/GetSearchItemByBizCode",
+                "https://openapi.chanjet.com/tplus/api/v2/VoucherAPIService/GetColumnSetByBizCode",
+                "https://openapi.chanjet.com/tplus/api/v2/ManufactureOrderOpenApi/FindVoucherList",
+            ],
+        )
+        self.assertEqual(result["data"], {"code": "0", "data": [{"Code": "MO-001", "Quantity": 3}]})
+
+    def test_safe_query_tplus_voucher_list_smart_wraps_missing_template(self):
+        client, transport = self.make_client(
+            [
+                {"result": True, "error": None, "value": {"rows": []}},
+                {"result": True, "error": None, "value": {"rows": []}},
+                {
+                    "result": True,
+                    "error": None,
+                    "value": {"productCode": "tcloud", "children": []},
+                },
+                {
+                    "result": True,
+                    "error": None,
+                    "value": {"productCode": "tcloud", "children": []},
+                },
+                {
+                    "result": True,
+                    "error": None,
+                    "value": {"productCode": "tcloud", "children": []},
+                },
+            ]
+        )
+
+        result = client.safe_query_tplus_voucher_list_smart(
+            voucher_name="生产加工单",
+            intent="列表",
+        )
+
+        self.assertFalse(result["ok"])
+        self.assertEqual(result["error"]["code"], "invalid_argument")
+        self.assertIn("No T+ voucher list template matched", result["error"]["message"])
+        self.assertIn("query_tplus_voucher_list_smart", result["error"]["hint"])
+        self.assertEqual(len(transport.calls), 5)
+
     def test_call_tplus_api_smart_rejects_unmatched_filter(self):
         client, transport = self.make_client(
             [
