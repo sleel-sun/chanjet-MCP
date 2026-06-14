@@ -222,6 +222,8 @@ class ChanjetTCloudClient:
         product_code: str,
         parent_code: str,
         module_code: str,
+        *,
+        non_object_value: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         if not product_code:
             raise ValueError("product_code is required")
@@ -237,7 +239,7 @@ class ChanjetTCloudClient:
                 module_code,
             ),
         )
-        return self._unwrap_docs_response(response)
+        return self._unwrap_docs_response(response, non_object_value=non_object_value)
 
     def get_tcloud_doc(self, parent_code: str, module_code: str) -> dict[str, Any]:
         return self.get_doc(TCLOUD_PRODUCT_CODE, parent_code, module_code)
@@ -520,7 +522,12 @@ class ChanjetTCloudClient:
         api_name: str | None = None,
     ) -> dict[str, Any]:
         metadata = self._product_metadata(product)
-        doc = self.get_doc(metadata["code"], parent_code, module_code)
+        doc = self.get_doc(
+            metadata["code"],
+            parent_code,
+            module_code,
+            non_object_value={},
+        )
         requested_name = self._normalize_match_value(api_name) if api_name else ""
         templates = []
         for entry in self._extract_api_entries(doc):
@@ -978,7 +985,17 @@ class ChanjetTCloudClient:
                 )
             )
         except Exception as exc:
-            return self.tool_error(exc)
+            hint = None
+            if "No API template matched" in str(exc):
+                hint = (
+                    "Use search_api_templates or get_api_call_template to verify "
+                    "parent_code, module_code, and api_name before calling "
+                    "call_tplus_api_smart."
+                )
+            return self.tool_error(
+                exc,
+                hint=hint,
+            )
 
     def tool_success(self, data: Any) -> dict[str, Any]:
         return {"ok": True, "data": data}
@@ -2308,13 +2325,20 @@ class ChanjetTCloudClient:
         encoded_parts = [quote(str(part), safe="") for part in parts]
         return f"{self.settings.docs_api_url}/{'/'.join(encoded_parts)}"
 
-    def _unwrap_docs_response(self, response: Any) -> dict[str, Any]:
+    def _unwrap_docs_response(
+        self,
+        response: Any,
+        *,
+        non_object_value: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         if not isinstance(response, dict):
             raise ChanjetApiError("Unexpected Chanjet document API response")
         if response.get("result") is True:
             value = response.get("value")
             if isinstance(value, dict):
                 return value
+            if non_object_value is not None:
+                return copy.deepcopy(non_object_value)
             raise ChanjetApiError("Chanjet document API returned a non-object value")
 
         error = response.get("error") or {}

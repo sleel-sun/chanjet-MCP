@@ -633,6 +633,16 @@ class ClientTests(unittest.TestCase):
         self.assertEqual(raised.exception.hint, "bad path")
         self.assertEqual(raised.exception.trace_id, "trace-1")
 
+    def test_get_doc_rejects_null_document_value(self):
+        client, _transport = self.make_client(
+            [{"result": True, "error": None, "value": None}]
+        )
+
+        with self.assertRaises(ChanjetApiError) as raised:
+            client.get_tcloud_doc("bad-parent", "bad-module")
+
+        self.assertIn("non-object", str(raised.exception))
+
     def test_call_tplus_api_injects_auth_headers_and_body(self):
         client, transport = self.make_client([{"code": "0", "data": [{"Code": "01"}]}])
 
@@ -1862,6 +1872,25 @@ class ClientTests(unittest.TestCase):
         self.assertFalse(result["ok"])
         self.assertEqual(result["error"]["code"], "invalid_argument")
         self.assertIn("Unmatched filter fields", result["error"]["message"])
+        self.assertIsNone(result["error"]["hint"])
+
+    def test_safe_call_tplus_api_smart_wraps_null_document_value_as_no_template(self):
+        client, transport = self.make_client(
+            [{"result": True, "error": None, "value": None}]
+        )
+
+        result = client.safe_call_tplus_api_smart(
+            parent_code="bad-parent",
+            module_code="bad-module",
+            api_name="列表查询",
+        )
+
+        self.assertFalse(result["ok"])
+        self.assertEqual(result["error"]["code"], "invalid_argument")
+        self.assertIn("No API template matched", result["error"]["message"])
+        self.assertIn("search_api_templates", result["error"]["hint"])
+        self.assertNotIn("non-object", result["error"]["message"])
+        self.assertEqual(len(transport.calls), 1)
 
     def test_tool_error_envelope_from_value_error(self):
         client, _transport = self.make_client([])
