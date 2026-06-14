@@ -775,6 +775,68 @@ Claude 示例：
 
 如果不传 `account_alias`，服务会使用 `CHANJET_ACTIVE_ACCOUNT` 或 token store 中的 active account。
 
+`query_tplus_voucher_list_smart`
+
+自然语言 T+ 单据列表查询工具。推荐用于“查生产加工单列表”“查询所有销货单”这类请求。服务会自动识别 `列表`、`查询`、`所有`、`全部` 等意图，解析单据 `bizCode`，搜索官方文档中的列表查询接口，生成分页和查询体，再调用 T+ 业务接口。
+
+参数示例：
+
+```json
+{
+  "voucher_name": "生产加工单",
+  "intent": "查询所有",
+  "module_code": "ManufactureOrderOpenApi",
+  "filters": {
+    "单据编号": "MO-001"
+  },
+  "display_fields": ["单据编号", "数量"],
+  "page_size": 50,
+  "page_index": 1,
+  "account_alias": "company-a"
+}
+```
+
+处理规则：
+
+1. `voucher_name` 先通过官方单据类型文档解析 `bizCode`，官方缺失时使用少量稳定兜底映射，例如 `生产加工单 -> MP05`。
+2. 工具会搜索官方文档并优先选择 `FindVoucherList` 或名称包含“列表查询”的接口。
+3. `filters` 的中文字段会按查询项解析并写入 `body.param.paramDic`。
+4. `display_fields` 会按栏目项解析并写入 `body.param.selectFields`。
+5. `page_size` 和 `page_index` 会写入 `body.param.pageSize` 和 `body.param.pageIndex`。
+6. 如果误传 `module_code: "ManufactureOrderOpenApi"`，工具会把它当作接口类名兼容处理，继续按 `voucher_name` 搜索官方文档。
+
+返回值包含实际业务响应、选中的官方模板、最终请求体和解析过程：
+
+```json
+{
+  "ok": true,
+  "data": {
+    "data": {},
+    "template": {},
+    "request": {
+      "path": "/tplus/api/v2/ManufactureOrderOpenApi/FindVoucherList",
+      "method": "POST",
+      "body": {
+        "param": {
+          "pageSize": 50,
+          "pageIndex": 1,
+          "paramDic": {
+            "Code": "MO-001"
+          },
+          "selectFields": ["Code", "Quantity"]
+        }
+      }
+    },
+    "resolved": {
+      "biz_code": "MP05",
+      "biz_code_source": "fallback",
+      "matched_filter_fields": [],
+      "matched_display_fields": []
+    }
+  }
+}
+```
+
 `query_tplus_voucher_list`
 
 查询 T+ 单据列表的专用工具。服务会先调用官方单据列表查询辅助接口，获取当前单据编码的查询项字段和显示栏目字段，再把 `display_fields` 自动匹配成真实字段并注入到列表查询请求中。
