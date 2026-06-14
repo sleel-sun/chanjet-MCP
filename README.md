@@ -405,6 +405,56 @@ Claude 示例：
 2. 显示栏目字段用于 `query_tplus_voucher_list.display_fields`。可以传中文名，工具会匹配成真实字段并注入 `body.param.selectFields`。
 3. 不知道 `biz_code` 时，先调用 `get_tplus_reference_codes` 查询单据类型编码。
 
+`call_natural`
+
+面向 LLM 客户端的最高层入口。它接收自然语言请求，确定性解析产品、动作、业务对象、字段、查询条件和显示字段，再路由到现有 MCP 工具。它不是内置大模型；低置信度或多候选时不会猜测调用接口，而是返回候选和缺失信息。
+
+适用示例：
+
+```json
+{
+  "user_input": "查询所有生产加工单，显示单据编号和数量",
+  "filters": {
+    "单据编号": "MO-001"
+  },
+  "page_size": 50,
+  "page_index": 1,
+  "account_alias": "company-a"
+}
+```
+
+```json
+{
+  "user_input": "好业财新增仓库，编码 WH001，名称 上海仓",
+  "dry_run": true
+}
+```
+
+返回结构：
+
+```json
+{
+  "ok": true,
+  "data": {
+    "parsed_intent": {},
+    "confidence": 0.85,
+    "decision": "call",
+    "selected_tool": "query_tplus_voucher_list_smart",
+    "candidates": [],
+    "request": {},
+    "data": {}
+  }
+}
+```
+
+处理规则：
+
+1. 高置信度才调用业务接口。
+2. `dry_run=true` 时只返回将要调用的工具和请求草案。
+3. 产品缺失、多产品可选、多模板接近或字段无法匹配时返回 `decision: "suggest"`，不会调用业务接口。
+4. T+ 单据列表请求会路由到 `query_tplus_voucher_list_smart`。
+5. 其他产品的明确单模板请求会路由到 `call_api_smart`。
+
 `call_api_smart`
 
 推荐优先使用的智能调用工具，支持 T+Cloud、HYC/ZPlus、HSY、YDZ/Finance 和 HKJ/Accounting。它会先读取官方接口模板，再把用户传入的中文字段解析成真实接口字段，最后自动路由到对应产品接口。解析不到字段时返回统一错误结构，不会静默调用错误请求。
