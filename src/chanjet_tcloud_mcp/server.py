@@ -343,6 +343,49 @@ def query_tplus_voucher_list(
 
 
 @mcp.tool()
+def query_tplus_voucher_list_smart(
+    voucher_name: str,
+    intent: str | None = None,
+    filters: dict[str, Any] | None = None,
+    display_fields: list[str] | None = None,
+    page_size: int = 20,
+    page_index: int = 1,
+    body_overrides: dict[str, Any] | list[Any] | None = None,
+    parent_code: str | None = None,
+    module_code: str | None = None,
+    api_name: str | None = None,
+    path: str | None = None,
+    method: str | None = None,
+    query: dict[str, Any] | None = None,
+    headers: dict[str, str] | None = None,
+    account_alias: str | None = None,
+) -> dict[str, Any]:
+    """Query a T+ voucher list from natural voucher name and list intent.
+
+    Use this for requests like 查询所有生产加工单. The service resolves bizCode,
+    finds the official list-query template, builds pageSize/pageIndex/paramDic,
+    resolves display_fields, and calls the T+ API.
+    """
+    return client.safe_query_tplus_voucher_list_smart(
+        voucher_name=voucher_name,
+        intent=intent,
+        filters=filters,
+        display_fields=display_fields,
+        page_size=page_size,
+        page_index=page_index,
+        body_overrides=body_overrides,
+        parent_code=parent_code,
+        module_code=module_code,
+        api_name=api_name,
+        path=path,
+        method=method,
+        query=query,
+        headers=headers,
+        account_alias=account_alias,
+    )
+
+
+@mcp.tool()
 def call_hyc_api(
     path: str,
     method: str = "POST",
