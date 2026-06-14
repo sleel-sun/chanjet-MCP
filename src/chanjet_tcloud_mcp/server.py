@@ -110,6 +110,43 @@ def diagnose_config() -> dict[str, Any]:
 
 
 @mcp.tool()
+def call_natural(
+    user_input: str,
+    product: str | None = None,
+    dry_run: bool = False,
+    fields: dict[str, Any] | None = None,
+    filters: dict[str, Any] | None = None,
+    display_fields: list[str] | None = None,
+    body_overrides: dict[str, Any] | list[Any] | None = None,
+    page_size: int = 20,
+    page_index: int = 1,
+    headers: dict[str, str] | None = None,
+    query: dict[str, Any] | None = None,
+    account_alias: str | None = None,
+) -> dict[str, Any]:
+    """Route a natural-language request to the safest matching Chanjet tool.
+
+    This deterministic router parses product, action, business object, fields,
+    filters, and display columns. It calls only high-confidence routes; otherwise
+    it returns ranked candidates for the LLM/client to inspect.
+    """
+    return client.safe_call_natural(
+        user_input=user_input,
+        product=product,
+        dry_run=dry_run,
+        fields=fields,
+        filters=filters,
+        display_fields=display_fields,
+        body_overrides=body_overrides,
+        page_size=page_size,
+        page_index=page_index,
+        headers=headers,
+        query=query,
+        account_alias=account_alias,
+    )
+
+
+@mcp.tool()
 def get_api_call_template(
     product: str,
     parent_code: str,
