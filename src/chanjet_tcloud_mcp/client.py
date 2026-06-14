@@ -29,6 +29,14 @@ TPLUS_VOUCHER_LIST_FIELD_DOC_MODULE_CODE = "djlbcxfz"
 TPLUS_DESCRIPTION_PARENT_CODE = "t+xdescription"
 TPLUS_VOUCHER_TYPE_MODULE_CODE = "t+vouchertype"
 TPLUS_BUSINESS_TYPE_MODULE_CODE = "t+busitype"
+TPLUS_LIST_INTENT_MARKERS = ("列表", "查询", "所有", "全部", "list", "query", "all")
+TPLUS_LIST_TEMPLATE_MARKERS = ("findvoucherlist", "列表查询", "列表", "查询")
+TPLUS_VOUCHER_BIZ_CODE_FALLBACKS = {
+    "生产加工单": "MP05",
+}
+TPLUS_MODULE_CODE_ALIASES = {
+    "manufactureorderopenapi": "module_code looks like an API implementation alias, so voucher_name search was used",
+}
 VOUCHER_FIELD_SELECTION_KEYS = {"selectfields", "fields", "columns", "select"}
 REFERENCE_CODE_KEYS = (
     "code",
@@ -1139,6 +1147,158 @@ class ChanjetTCloudClient:
             "source_doc": field_data["source_doc"],
         }
 
+    def query_tplus_voucher_list_smart(
+        self,
+        *,
+        voucher_name: str,
+        intent: str | None = None,
+        filters: dict[str, Any] | None = None,
+        display_fields: list[str] | None = None,
+        page_size: int = 20,
+        page_index: int = 1,
+        body_overrides: Any = None,
+        parent_code: str | None = None,
+        module_code: str | None = None,
+        api_name: str | None = None,
+        path: str | None = None,
+        method: str | None = None,
+        query: dict[str, Any] | None = None,
+        headers: dict[str, str] | None = None,
+        account_alias: str | None = None,
+    ) -> dict[str, Any]:
+        if not voucher_name or not str(voucher_name).strip():
+            raise ValueError("voucher_name is required")
+        if not self._is_tplus_list_intent(intent):
+            raise ValueError(
+                "Unsupported T+ voucher list intent; use call_api_smart for non-list operations"
+            )
+
+        resolved_code = self._resolve_tplus_voucher_biz_code(voucher_name)
+        template_result = self._find_tplus_voucher_list_template(
+            voucher_name=voucher_name,
+            intent=intent,
+            parent_code=parent_code,
+            module_code=module_code,
+            api_name=api_name,
+            path=path,
+            method=method,
+        )
+        template = template_result["template"]
+
+        field_data = self.get_tplus_voucher_list_fields(
+            biz_code=resolved_code["biz_code"],
+            headers=headers,
+            account_alias=account_alias,
+        )
+        request_body = self._tplus_list_body(
+            template.get("body"),
+            page_size=page_size,
+            page_index=page_index,
+        )
+        matched_filter_fields = self._inject_tplus_list_filters(
+            request_body,
+            filters or {},
+            field_data["query_fields"],
+        )
+        matched_display_fields, unmatched_display_fields = self._match_display_fields(
+            display_fields or [],
+            field_data["display_fields"],
+        )
+        if unmatched_display_fields:
+            raise ValueError(
+                f"Unmatched display fields: {', '.join(unmatched_display_fields)}"
+            )
+        request_body = self._inject_display_fields(
+            request_body,
+            [field["field"] for field in matched_display_fields],
+        )
+        if body_overrides is not None:
+            request_body = self._deep_merge_values(request_body, body_overrides)
+
+        request_args = {
+            "path": template_result["path"],
+            "method": method or template.get("method") or "POST",
+            "body": request_body,
+            "query": query or {},
+            "headers": headers or {},
+            "account_alias": account_alias,
+        }
+        response = self.call_tplus_api(
+            path=request_args["path"],
+            method=request_args["method"],
+            body=request_args["body"],
+            query=request_args["query"],
+            headers=request_args["headers"],
+            account_alias=account_alias,
+        )
+
+        return {
+            "data": response,
+            "template": template,
+            "request": request_args,
+            "resolved": {
+                "voucher_name": str(voucher_name).strip(),
+                "intent": intent or "列表查询",
+                "biz_code": resolved_code["biz_code"],
+                "biz_code_source": resolved_code["source"],
+                "module": template_result["module"],
+                "selected_template_reason": template_result["reason"],
+                "search_queries": template_result["search_queries"],
+                "compatibility": template_result["compatibility"],
+                "matched_filter_fields": matched_filter_fields,
+                "matched_display_fields": matched_display_fields,
+                "field_source_doc": field_data["source_doc"],
+            },
+        }
+
+    def safe_query_tplus_voucher_list_smart(
+        self,
+        *,
+        voucher_name: str,
+        intent: str | None = None,
+        filters: dict[str, Any] | None = None,
+        display_fields: list[str] | None = None,
+        page_size: int = 20,
+        page_index: int = 1,
+        body_overrides: Any = None,
+        parent_code: str | None = None,
+        module_code: str | None = None,
+        api_name: str | None = None,
+        path: str | None = None,
+        method: str | None = None,
+        query: dict[str, Any] | None = None,
+        headers: dict[str, str] | None = None,
+        account_alias: str | None = None,
+    ) -> dict[str, Any]:
+        try:
+            return self.tool_success(
+                self.query_tplus_voucher_list_smart(
+                    voucher_name=voucher_name,
+                    intent=intent,
+                    filters=filters,
+                    display_fields=display_fields,
+                    page_size=page_size,
+                    page_index=page_index,
+                    body_overrides=body_overrides,
+                    parent_code=parent_code,
+                    module_code=module_code,
+                    api_name=api_name,
+                    path=path,
+                    method=method,
+                    query=query,
+                    headers=headers,
+                    account_alias=account_alias,
+                )
+            )
+        except Exception as exc:
+            return self.tool_error(
+                exc,
+                hint=(
+                    "Use query_tplus_voucher_list_smart with voucher_name for natural list requests, "
+                    "or call search_api_templates/get_api_call_template to inspect official modules."
+                ),
+            )
+
     def call_hyc_api(
         self,
         path: str,
@@ -1947,6 +2107,268 @@ class ChanjetTCloudClient:
             return False
         normalized_code = str(code).casefold()
         return normalized_code not in {"0", "200", "openapi.e0000"}
+
+    def _is_tplus_list_intent(self, intent: str | None) -> bool:
+        if intent is None or not str(intent).strip():
+            return True
+        normalized = self._normalize_match_value(intent)
+        raw = str(intent).casefold()
+        return any(
+            marker in raw or self._normalize_match_value(marker) in normalized
+            for marker in TPLUS_LIST_INTENT_MARKERS
+        )
+
+    def _tplus_voucher_search_queries(
+        self,
+        voucher_name: str,
+        intent: str | None,
+    ) -> list[str]:
+        base = str(voucher_name).strip()
+        intent_text = str(intent).strip() if intent else "列表查询"
+        candidates = [
+            f"{base} {intent_text}",
+            f"{base} 列表查询",
+            base,
+        ]
+        if not intent:
+            candidates.insert(2, f"{base} 查询")
+        queries: list[str] = []
+        for candidate in candidates:
+            if candidate and candidate not in queries:
+                queries.append(candidate)
+        return queries
+
+    def _resolve_tplus_voucher_biz_code(self, voucher_name: str) -> dict[str, str]:
+        reference_lookup = self.get_tplus_reference_codes(query=voucher_name)
+        try:
+            return {
+                "biz_code": self._resolve_reference_code(
+                    reference_lookup["voucher_types"],
+                    voucher_name,
+                    label="voucher type",
+                ),
+                "source": "official",
+            }
+        except ValueError:
+            normalized_name = self._normalize_match_value(voucher_name)
+            for name, code in TPLUS_VOUCHER_BIZ_CODE_FALLBACKS.items():
+                if self._normalize_match_value(name) == normalized_name:
+                    return {"biz_code": code, "source": "fallback"}
+        raise ValueError(f"Could not resolve voucher bizCode: {voucher_name}")
+
+    def _find_tplus_voucher_list_template(
+        self,
+        *,
+        voucher_name: str,
+        intent: str | None,
+        parent_code: str | None,
+        module_code: str | None,
+        api_name: str | None,
+        path: str | None,
+        method: str | None,
+    ) -> dict[str, Any]:
+        compatibility: list[dict[str, str]] = []
+        normalized_module_code = self._normalize_tplus_module_hint(
+            module_code,
+            compatibility,
+        )
+        explicit_path = self._normalize_api_path(path) if path else None
+        candidates: list[dict[str, Any]] = []
+        search_queries: list[str] = []
+
+        if parent_code and normalized_module_code:
+            try:
+                template_result = self.get_api_call_template(
+                    product=TCLOUD_PRODUCT_CODE,
+                    parent_code=parent_code,
+                    module_code=normalized_module_code,
+                    api_name=api_name,
+                )
+                for template in template_result["templates"]:
+                    candidates.append(
+                        {
+                            "template": template,
+                            "module": template_result["module"],
+                            "path": explicit_path or template["path"],
+                            "reason": "explicit_module",
+                        }
+                    )
+            except Exception as exc:
+                compatibility.append(
+                    {
+                        "input": str(module_code),
+                        "decision": "ignored_unresolved_module_code",
+                        "reason": str(exc),
+                    }
+                )
+
+        for search_query in self._tplus_voucher_search_queries(voucher_name, intent):
+            search_queries.append(search_query)
+            result = self.search_api_templates(
+                query=search_query,
+                product=TCLOUD_PRODUCT_CODE,
+                api_name=api_name,
+                limit=10,
+            )
+            for template in result["templates"]:
+                candidates.append(
+                    {
+                        "template": template,
+                        "module": template.get("module", {}),
+                        "path": explicit_path or template["path"],
+                        "reason": "official_doc_search",
+                    }
+                )
+            if candidates:
+                break
+
+        if explicit_path and not candidates:
+            normalized_method = (method or "POST").upper()
+            template = {
+                "api_name": api_name or explicit_path,
+                "path": explicit_path,
+                "method": normalized_method,
+                "body": {},
+                "query": {},
+                "headers": {},
+                "tool": "call_tplus_api",
+                "arguments": {
+                    "path": explicit_path,
+                    "method": normalized_method,
+                    "body": {},
+                    "query": {},
+                    "headers": {},
+                    "account_alias": None,
+                },
+                "raw": {},
+            }
+            return {
+                "template": template,
+                "module": {},
+                "path": explicit_path,
+                "reason": "explicit_path",
+                "search_queries": search_queries,
+                "compatibility": compatibility,
+            }
+
+        ranked_candidates = [
+            (self._rank_tplus_voucher_list_template(candidate, voucher_name), candidate)
+            for candidate in candidates
+        ]
+        ranked_candidates = [
+            item for item in ranked_candidates if item[0][0] < 10
+        ]
+        if not ranked_candidates:
+            raise ValueError(
+                f"No T+ voucher list template matched voucher_name={voucher_name}"
+            )
+
+        _rank, selected = sorted(ranked_candidates, key=lambda item: item[0])[0]
+        return {
+            "template": selected["template"],
+            "module": selected["module"],
+            "path": selected["path"],
+            "reason": selected["reason"],
+            "search_queries": search_queries,
+            "compatibility": compatibility,
+        }
+
+    def _rank_tplus_voucher_list_template(
+        self,
+        candidate: dict[str, Any],
+        voucher_name: str,
+    ) -> tuple[int, int]:
+        template = candidate["template"]
+        haystack = self._normalize_match_value(
+            " ".join(
+                str(value)
+                for value in (
+                    template.get("api_name"),
+                    template.get("path"),
+                    candidate.get("module", {}).get("module_name"),
+                    candidate.get("module", {}).get("module_path"),
+                )
+                if value
+            )
+        )
+        voucher_match = 0 if self._normalize_match_value(voucher_name) in haystack else 1
+        if "findvoucherlist" in haystack:
+            return (0, voucher_match)
+        if any(
+            self._normalize_match_value(marker) in haystack
+            for marker in TPLUS_LIST_TEMPLATE_MARKERS
+        ):
+            return (1, voucher_match)
+        return (10, voucher_match)
+
+    def _normalize_tplus_module_hint(
+        self,
+        module_code: str | None,
+        compatibility: list[dict[str, str]],
+    ) -> str | None:
+        if not module_code or not str(module_code).strip():
+            return None
+        normalized = self._normalize_match_value(module_code)
+        reason = TPLUS_MODULE_CODE_ALIASES.get(normalized)
+        if reason is not None:
+            compatibility.append(
+                {
+                    "input": str(module_code),
+                    "decision": "ignored_module_code_alias",
+                    "reason": reason,
+                }
+            )
+            return None
+        return str(module_code).strip()
+
+    def _tplus_list_body(
+        self,
+        body: Any,
+        *,
+        page_size: int,
+        page_index: int,
+    ) -> dict[str, Any]:
+        copied_body = copy.deepcopy(body) if isinstance(body, dict) else {}
+        param = copied_body.get("param")
+        if not isinstance(param, dict):
+            param = {}
+            copied_body["param"] = param
+        param["pageSize"] = page_size
+        param["pageIndex"] = page_index
+        if not isinstance(param.get("paramDic"), dict):
+            param["paramDic"] = {}
+        return copied_body
+
+    def _inject_tplus_list_filters(
+        self,
+        body: dict[str, Any],
+        filters: dict[str, Any],
+        query_fields: list[dict[str, Any]],
+    ) -> list[dict[str, str]]:
+        param = body["param"]
+        param_dic = param["paramDic"]
+        matched_filter_fields: list[dict[str, str]] = []
+        unmatched_filters: list[str] = []
+        for requested, value in filters.items():
+            requested_text = str(requested).strip()
+            match = self._find_display_field_match(requested_text, query_fields)
+            if match is None:
+                unmatched_filters.append(requested_text)
+                continue
+            field_name = str(match["field"])
+            param_dic[field_name] = value
+            matched_filter_fields.append(
+                {
+                    "requested": requested_text,
+                    "field": field_name,
+                    "label": str(match["label"]),
+                }
+            )
+        if unmatched_filters:
+            raise ValueError(
+                f"Unmatched filter fields: {', '.join(unmatched_filters)}"
+            )
+        return matched_filter_fields
 
     def _voucher_field_request_body(self, biz_code: str) -> dict[str, Any]:
         return {
