@@ -1969,6 +1969,285 @@ class ClientTests(unittest.TestCase):
         self.assertIn("query_tplus_voucher_list_smart", result["error"]["hint"])
         self.assertEqual(len(transport.calls), 5)
 
+    def test_safe_call_natural_wraps_empty_input(self):
+        client, _transport = self.make_client([])
+
+        result = client.safe_call_natural(user_input="   ")
+
+        self.assertFalse(result["ok"])
+        self.assertEqual(result["error"]["code"], "invalid_argument")
+        self.assertIn("user_input is required", result["error"]["message"])
+
+    def test_call_natural_suggests_when_product_is_missing(self):
+        client, transport = self.make_client([])
+
+        result = client.call_natural(user_input="新增仓库")
+
+        self.assertEqual(result["decision"], "suggest")
+        self.assertEqual(result["selected_tool"], None)
+        self.assertLess(result["confidence"], 0.75)
+        self.assertIn("product", result["missing"])
+        self.assertEqual(result["parsed_intent"]["action"], "create")
+        self.assertEqual(result["parsed_intent"]["business_object"], "仓库")
+        self.assertEqual(len(transport.calls), 0)
+
+    def test_call_natural_routes_tplus_voucher_list_request(self):
+        client, transport = self.make_client(
+            [
+                {
+                    "result": True,
+                    "error": None,
+                    "value": {"rows": [{"code": "SA04", "name": "销货单"}]},
+                },
+                {"result": True, "error": None, "value": {"rows": []}},
+                {
+                    "result": True,
+                    "error": None,
+                    "value": {"productCode": "tcloud", "children": []},
+                },
+                {
+                    "result": True,
+                    "error": None,
+                    "value": {"productCode": "tcloud", "children": []},
+                },
+                {
+                    "result": True,
+                    "error": None,
+                    "value": {
+                        "productCode": "tcloud",
+                        "children": [
+                            {
+                                "moduleCode": "t+sc",
+                                "moduleName": "生产管理",
+                                "children": [
+                                    {
+                                        "moduleCode": "manufactureOrder",
+                                        "moduleName": "生产加工单",
+                                    }
+                                ],
+                            }
+                        ],
+                    },
+                },
+                {
+                    "result": True,
+                    "error": None,
+                    "value": {
+                        "modulePath": "T+Cloud / 生产管理 / 生产加工单",
+                        "moduleName": "生产加工单",
+                        "documentApiInfoList": [
+                            {
+                                "apiName": "生产加工单列表查询",
+                                "apiUrl": "/tplus/api/v2/ManufactureOrderOpenApi/FindVoucherList",
+                                "requestMethod": "POST",
+                                "requestBody": {"param": {}},
+                            }
+                        ],
+                    },
+                },
+                {
+                    "code": "0",
+                    "data": {
+                        "items": [
+                            {"FieldName": "Code", "Caption": "单据编号"},
+                            {"FieldName": "VoucherDate", "Caption": "单据日期"},
+                        ]
+                    },
+                },
+                {
+                    "code": "0",
+                    "data": {
+                        "columns": [
+                            {"FieldName": "Code", "Caption": "单据编号"},
+                            {"FieldName": "Quantity", "Caption": "数量"},
+                        ]
+                    },
+                },
+                {"code": "0", "data": [{"Code": "MO-001", "Quantity": 3}]},
+            ]
+        )
+
+        result = client.call_natural(
+            user_input="查询所有生产加工单，显示单据编号和数量",
+            filters={"单据编号": "MO-001"},
+            page_size=50,
+            page_index=2,
+        )
+
+        self.assertEqual(result["decision"], "call")
+        self.assertEqual(result["selected_tool"], "query_tplus_voucher_list_smart")
+        self.assertGreaterEqual(result["confidence"], 0.75)
+        self.assertEqual(result["parsed_intent"]["product"], "tcloud")
+        self.assertEqual(result["parsed_intent"]["action"], "list")
+        self.assertEqual(result["parsed_intent"]["voucher_name"], "生产加工单")
+        self.assertEqual(result["parsed_intent"]["display_fields"], ["单据编号", "数量"])
+        self.assertEqual(result["request"]["body"]["param"]["paramDic"], {"Code": "MO-001"})
+        self.assertEqual(result["request"]["body"]["param"]["selectFields"], ["Code", "Quantity"])
+        self.assertEqual(result["data"], {"code": "0", "data": [{"Code": "MO-001", "Quantity": 3}]})
+        self.assertEqual(
+            transport.calls[-1]["url"],
+            "https://openapi.chanjet.com/tplus/api/v2/ManufactureOrderOpenApi/FindVoucherList",
+        )
+
+    def test_call_natural_dry_run_returns_hyc_route_without_business_call(self):
+        client, transport = self.make_client(
+            [
+                {
+                    "result": True,
+                    "error": None,
+                    "value": {
+                        "productCode": "zplus",
+                        "children": [
+                            {
+                                "moduleCode": "zjjcda",
+                                "moduleName": "基础档案",
+                                "children": [{"moduleCode": "ck", "moduleName": "仓库"}],
+                            }
+                        ],
+                    },
+                },
+                {
+                    "result": True,
+                    "error": None,
+                    "value": {
+                        "modulePath": "好业财 / 基础档案 / 仓库",
+                        "moduleName": "仓库",
+                        "documentApiInfoList": [
+                            {
+                                "apiName": "仓库新增",
+                                "apiUrl": "/accounting/openapi/cc/warehouse/create/123",
+                                "requestMethod": "POST",
+                                "requestBody": {"code": "", "name": "", "statusEnum": "A"},
+                                "requestParams": [
+                                    {"field": "code", "name": "编码"},
+                                    {"field": "name", "name": "名称"},
+                                ],
+                            }
+                        ],
+                    },
+                },
+            ]
+        )
+
+        result = client.call_natural(
+            user_input="好业财新增仓库，编码 WH001，名称 上海仓",
+            dry_run=True,
+        )
+
+        self.assertEqual(result["decision"], "call")
+        self.assertEqual(result["selected_tool"], "call_api_smart")
+        self.assertTrue(result["dry_run"])
+        self.assertEqual(result["parsed_intent"]["product"], "zplus")
+        self.assertEqual(result["parsed_intent"]["action"], "create")
+        self.assertEqual(result["parsed_intent"]["business_object"], "仓库")
+        self.assertEqual(result["parsed_intent"]["fields"], {"编码": "WH001", "名称": "上海仓"})
+        self.assertEqual(result["request"]["path"], "/accounting/openapi/cc/warehouse/create/123")
+        self.assertEqual(len(transport.calls), 2)
+
+    def test_call_natural_calls_hyc_create_when_single_template_matches(self):
+        api_doc = {
+            "result": True,
+            "error": None,
+            "value": {
+                "modulePath": "好业财 / 基础档案 / 仓库",
+                "moduleName": "仓库",
+                "documentApiInfoList": [
+                    {
+                        "apiName": "仓库新增",
+                        "apiUrl": "/accounting/openapi/cc/warehouse/create/123",
+                        "requestMethod": "POST",
+                        "requestBody": {"code": "", "name": "", "statusEnum": "A"},
+                        "requestParams": [
+                            {"field": "code", "name": "编码"},
+                            {"field": "name", "name": "名称"},
+                        ],
+                    }
+                ],
+            },
+        }
+        client, transport = self.make_client(
+            [
+                {
+                    "result": True,
+                    "error": None,
+                    "value": {
+                        "productCode": "zplus",
+                        "children": [
+                            {
+                                "moduleCode": "zjjcda",
+                                "moduleName": "基础档案",
+                                "children": [{"moduleCode": "ck", "moduleName": "仓库"}],
+                            }
+                        ],
+                    },
+                },
+                api_doc,
+                api_doc,
+                {"code": "0", "data": {"id": "WH001"}},
+            ]
+        )
+
+        result = client.call_natural(user_input="好业财新增仓库，编码 WH001，名称 上海仓")
+
+        self.assertEqual(result["decision"], "call")
+        self.assertEqual(result["selected_tool"], "call_api_smart")
+        self.assertEqual(result["request"]["body"], {"code": "WH001", "name": "上海仓", "statusEnum": "A"})
+        self.assertEqual(
+            transport.calls[-1]["url"],
+            "https://openapi.chanjet.com/accounting/openapi/cc/warehouse/create/123",
+        )
+        self.assertEqual(result["data"], {"code": "0", "data": {"id": "WH001"}})
+
+    def test_call_natural_suggests_when_multiple_templates_match(self):
+        client, transport = self.make_client(
+            [
+                {
+                    "result": True,
+                    "error": None,
+                    "value": {
+                        "productCode": "zplus",
+                        "children": [
+                            {
+                                "moduleCode": "zjjcda",
+                                "moduleName": "基础档案",
+                                "children": [{"moduleCode": "ck", "moduleName": "仓库"}],
+                            }
+                        ],
+                    },
+                },
+                {
+                    "result": True,
+                    "error": None,
+                    "value": {
+                        "modulePath": "好业财 / 基础档案 / 仓库",
+                        "moduleName": "仓库",
+                        "documentApiInfoList": [
+                            {
+                                "apiName": "仓库新增",
+                                "apiUrl": "/accounting/openapi/cc/warehouse/create/123",
+                                "requestMethod": "POST",
+                                "requestBody": {"code": "", "name": ""},
+                            },
+                            {
+                                "apiName": "仓库快速新增",
+                                "apiUrl": "/accounting/openapi/cc/warehouse/quickCreate/123",
+                                "requestMethod": "POST",
+                                "requestBody": {"code": "", "name": ""},
+                            },
+                        ],
+                    },
+                },
+            ]
+        )
+
+        result = client.call_natural(user_input="好业财新增仓库，编码 WH001，名称 上海仓")
+
+        self.assertEqual(result["decision"], "suggest")
+        self.assertEqual(result["selected_tool"], None)
+        self.assertGreaterEqual(len(result["candidates"]), 2)
+        self.assertEqual(len(transport.calls), 2)
+        self.assertTrue(all(candidate["tool"] == "call_api_smart" for candidate in result["candidates"]))
+
     def test_call_tplus_api_smart_rejects_unmatched_filter(self):
         client, transport = self.make_client(
             [
