@@ -53,7 +53,7 @@ Safe wrapper errors use the existing `tool_error` envelope.
    - Ensure `body.param` exists as an object.
    - Ensure `body.param.pageSize` and `body.param.pageIndex` exist from `page_size` and `page_index`, unless already set by the template. `body_overrides` may still replace them during the final merge.
    - Ensure `body.param.paramDic` exists as an object.
-   - Resolve `filters` through `get_tplus_voucher_list_fields(biz_code=...)` query fields. Matched filter values are written into `body.param.paramDic`.
+   - Resolve `filters` through `get_tplus_voucher_list_fields` using the resolved voucher `biz_code`. Matched filter values are written into `body.param.paramDic`.
    - Resolve `display_fields` through display columns. Matched fields are written into `body.param.selectFields`, unless an existing field-selection key is already present.
    - Deep merge `body_overrides` last.
 6. Call the T+ API through the existing authenticated `call_tplus_api` path.
@@ -65,9 +65,9 @@ The implementation should add generic helpers instead of voucher-specific method
 - `_is_tplus_list_intent(intent)`
 - `_tplus_voucher_search_queries(voucher_name, intent)`
 - `_resolve_tplus_voucher_biz_code(voucher_name)`
-- `_find_tplus_voucher_list_template(...)`
-- `_rank_tplus_voucher_list_template(...)`
-- `_tplus_param_body(body)`
+- `_find_tplus_voucher_list_template(voucher_name, intent, hints)`
+- `_rank_tplus_voucher_list_template(candidate, voucher_name)`
+- `_tplus_list_body(body)`
 - `_inject_tplus_list_filters(body, filters, query_fields)`
 - `_normalize_tplus_module_hint(module_code)`
 
