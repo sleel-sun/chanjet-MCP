@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import copy
 import hashlib
+import re
 import time
 import uuid
 from dataclasses import replace
@@ -100,6 +101,38 @@ PRODUCT_ALIASES = {
     for product_code, metadata in PRODUCT_METADATA.items()
     for alias in metadata["aliases"]
 }
+NATURAL_PRODUCT_ALIASES = {
+    alias.casefold(): product_code
+    for product_code, metadata in PRODUCT_METADATA.items()
+    for alias in metadata["aliases"]
+}
+NATURAL_PRODUCT_ALIASES.update(
+    {
+        "t+cloud": TCLOUD_PRODUCT_CODE,
+        "好业财": HYC_PRODUCT_CODE,
+        "好生意": HSY_PRODUCT_CODE,
+        "易代账": YDZ_PRODUCT_CODE,
+        "好会计": HKJ_PRODUCT_CODE,
+    }
+)
+NATURAL_ACTION_ALIASES = {
+    "list": ("列表", "查询", "查", "所有", "全部", "list", "query", "all"),
+    "create": ("新增", "创建", "添加", "保存", "create", "add", "save"),
+    "update": ("修改", "更新", "编辑", "update", "edit"),
+    "delete": ("删除", "移除", "作废", "delete", "remove"),
+    "audit": ("审核", "审批", "通过", "audit", "approve"),
+    "unaudit": ("弃审", "反审核", "取消审核", "unaudit", "unapprove"),
+}
+NATURAL_ACTION_API_NAMES = {
+    "list": "查询",
+    "create": "新增",
+    "update": "修改",
+    "delete": "删除",
+    "audit": "审核",
+    "unaudit": "弃审",
+}
+NATURAL_CALL_THRESHOLD = 0.75
+NATURAL_CLOSE_CANDIDATE_DELTA = 0.10
 API_NAME_KEYS = (
     "apiName",
     "name",
@@ -1299,6 +1332,133 @@ class ChanjetTCloudClient:
                 ),
             )
 
+    def call_natural(
+        self,
+        user_input: str,
+        *,
+        product: str | None = None,
+        dry_run: bool = False,
+        fields: dict[str, Any] | None = None,
+        filters: dict[str, Any] | None = None,
+        display_fields: list[str] | None = None,
+        body_overrides: Any = None,
+        page_size: int = 20,
+        page_index: int = 1,
+        headers: dict[str, str] | None = None,
+        query: dict[str, Any] | None = None,
+        account_alias: str | None = None,
+    ) -> dict[str, Any]:
+        parsed = self._parse_natural_intent(
+            user_input,
+            product=product,
+            fields=fields,
+            filters=filters,
+            display_fields=display_fields,
+        )
+        if not parsed["user_input"]:
+            raise ValueError("user_input is required")
+
+        if (
+            parsed["action"] == "list"
+            and parsed["product"] in (None, TCLOUD_PRODUCT_CODE)
+            and parsed["business_object"]
+            and self._natural_object_can_default_to_tplus(parsed["business_object"])
+        ):
+            parsed["product"] = TCLOUD_PRODUCT_CODE
+            parsed["voucher_name"] = parsed["business_object"]
+            parsed["product_source"] = (
+                parsed["product_source"] or "tplus_voucher_default"
+            )
+
+        if not parsed["product"]:
+            return self._natural_suggestion(
+                parsed,
+                confidence=self._natural_confidence(parsed, template_found=False),
+                missing=["product"],
+                reason="Product could not be identified from user_input.",
+            )
+
+        if (
+            parsed["action"] == "list"
+            and parsed["product"] == TCLOUD_PRODUCT_CODE
+            and parsed["voucher_name"]
+        ):
+            return self._call_natural_tplus_list(
+                parsed,
+                dry_run=dry_run,
+                filters=filters,
+                body_overrides=body_overrides,
+                page_size=page_size,
+                page_index=page_index,
+                headers=headers,
+                query=query,
+                account_alias=account_alias,
+            )
+
+        if not parsed["action"] or not parsed["business_object"]:
+            missing = []
+            if not parsed["action"]:
+                missing.append("action")
+            if not parsed["business_object"]:
+                missing.append("business_object")
+            return self._natural_suggestion(
+                parsed,
+                confidence=self._natural_confidence(parsed, template_found=False),
+                missing=missing,
+                reason="Action or business object could not be identified.",
+            )
+
+        return self._call_natural_template(
+            parsed,
+            dry_run=dry_run,
+            body_overrides=body_overrides,
+            headers=headers,
+            query=query,
+            account_alias=account_alias,
+        )
+
+    def safe_call_natural(
+        self,
+        user_input: str,
+        *,
+        product: str | None = None,
+        dry_run: bool = False,
+        fields: dict[str, Any] | None = None,
+        filters: dict[str, Any] | None = None,
+        display_fields: list[str] | None = None,
+        body_overrides: Any = None,
+        page_size: int = 20,
+        page_index: int = 1,
+        headers: dict[str, str] | None = None,
+        query: dict[str, Any] | None = None,
+        account_alias: str | None = None,
+    ) -> dict[str, Any]:
+        try:
+            return self.tool_success(
+                self.call_natural(
+                    user_input=user_input,
+                    product=product,
+                    dry_run=dry_run,
+                    fields=fields,
+                    filters=filters,
+                    display_fields=display_fields,
+                    body_overrides=body_overrides,
+                    page_size=page_size,
+                    page_index=page_index,
+                    headers=headers,
+                    query=query,
+                    account_alias=account_alias,
+                )
+            )
+        except Exception as exc:
+            return self.tool_error(
+                exc,
+                hint=(
+                    "Pass a natural request such as 查询所有生产加工单 or provide "
+                    "product/action hints."
+                ),
+            )
+
     def call_hyc_api(
         self,
         path: str,
@@ -2107,6 +2267,387 @@ class ChanjetTCloudClient:
             return False
         normalized_code = str(code).casefold()
         return normalized_code not in {"0", "200", "openapi.e0000"}
+
+    def _parse_natural_intent(
+        self,
+        user_input: str,
+        *,
+        product: str | None,
+        fields: dict[str, Any] | None,
+        filters: dict[str, Any] | None,
+        display_fields: list[str] | None,
+    ) -> dict[str, Any]:
+        text = str(user_input or "").strip()
+        product_code, product_source = self._natural_product(text, product)
+        action = self._natural_action(text)
+        parsed_display_fields = display_fields or self._natural_display_fields(text)
+        parsed_fields = fields or self._natural_key_values(text)
+        business_object = self._natural_business_object(
+            text,
+            product_code=product_code,
+            action=action,
+            display_fields=parsed_display_fields,
+            parsed_fields=parsed_fields,
+        )
+        return {
+            "user_input": text,
+            "product": product_code,
+            "product_source": product_source,
+            "action": action,
+            "business_object": business_object,
+            "voucher_name": business_object if action == "list" else None,
+            "fields": parsed_fields,
+            "filters": filters or {},
+            "display_fields": parsed_display_fields,
+            "unresolved_text": text,
+        }
+
+    def _natural_product(
+        self,
+        text: str,
+        product_hint: str | None,
+    ) -> tuple[str | None, str | None]:
+        if product_hint:
+            product_key = str(product_hint).strip().casefold()
+            product_code = NATURAL_PRODUCT_ALIASES.get(product_key)
+            if product_code is None:
+                product_code = self._product_metadata(product_hint)["code"]
+            return product_code, "explicit"
+
+        normalized_text = text.casefold()
+        matches: list[str] = []
+        for alias, product_code in NATURAL_PRODUCT_ALIASES.items():
+            if alias and alias in normalized_text:
+                matches.append(product_code)
+        unique_matches = []
+        for item in matches:
+            if item not in unique_matches:
+                unique_matches.append(item)
+        if len(unique_matches) == 1:
+            return unique_matches[0], "user_input"
+        return None, None
+
+    def _natural_action(self, text: str) -> str | None:
+        raw = text.casefold()
+        normalized = self._normalize_match_value(text)
+        for action, markers in NATURAL_ACTION_ALIASES.items():
+            if any(
+                marker.casefold() in raw
+                or self._normalize_match_value(marker) in normalized
+                for marker in markers
+            ):
+                return action
+        return None
+
+    def _natural_display_fields(self, text: str) -> list[str]:
+        marker = "显示"
+        if marker not in text:
+            return []
+        tail = text.split(marker, 1)[1]
+        tail = re.split(r"[，,。；;]", tail, maxsplit=1)[0]
+        return [
+            part.strip()
+            for part in re.split(r"[、和及/\s]+", tail)
+            if part.strip()
+        ]
+
+    def _natural_key_values(self, text: str) -> dict[str, Any]:
+        values: dict[str, Any] = {}
+        for part in re.split(r"[，,。；;]", text):
+            cleaned = part.strip()
+            if not cleaned:
+                continue
+            match = re.match(r"^([^\s:：=]+)\s*[:：= ]\s*(.+)$", cleaned)
+            if not match:
+                continue
+            key = match.group(1).strip()
+            value = match.group(2).strip()
+            if key and value and key not in {"显示", "查询", "新增", "创建"}:
+                values[key] = value
+        return values
+
+    def _natural_business_object(
+        self,
+        text: str,
+        *,
+        product_code: str | None,
+        action: str | None,
+        display_fields: list[str],
+        parsed_fields: dict[str, Any],
+    ) -> str | None:
+        head = re.split(r"[，,。；;]", text, maxsplit=1)[0].strip()
+        if "显示" in head:
+            head = head.split("显示", 1)[0].strip()
+        for metadata in PRODUCT_METADATA.values():
+            for alias in metadata["aliases"]:
+                head = head.replace(str(alias), "")
+            head = head.replace(metadata["name"], "")
+        for alias in NATURAL_PRODUCT_ALIASES:
+            if any(ord(char) > 127 for char in alias):
+                head = head.replace(alias, "")
+        markers: list[str] = []
+        for items in NATURAL_ACTION_ALIASES.values():
+            markers.extend(str(item) for item in items)
+        for marker in sorted(markers, key=len, reverse=True):
+            head = head.replace(marker, "")
+        for field_name in display_fields:
+            head = head.replace(field_name, "")
+        for key in parsed_fields:
+            head = head.replace(key, "")
+            head = head.replace(str(parsed_fields[key]), "")
+        cleaned = re.sub(r"\s+", "", head)
+        return cleaned or None
+
+    def _natural_object_can_default_to_tplus(self, business_object: str) -> bool:
+        normalized = self._normalize_match_value(business_object)
+        return any(
+            self._normalize_match_value(name) == normalized
+            for name in TPLUS_VOUCHER_BIZ_CODE_FALLBACKS
+        )
+
+    def _natural_confidence(
+        self,
+        parsed: dict[str, Any],
+        *,
+        template_found: bool,
+        field_confidence: bool = False,
+    ) -> float:
+        score = 0.0
+        if parsed.get("product"):
+            score += 0.25
+        if parsed.get("action"):
+            score += 0.20
+        if parsed.get("business_object") or parsed.get("voucher_name"):
+            score += 0.20
+        if template_found:
+            score += 0.25
+        if field_confidence:
+            score += 0.10
+        return min(score, 1.0)
+
+    def _natural_suggestion(
+        self,
+        parsed: dict[str, Any],
+        *,
+        confidence: float,
+        missing: list[str],
+        reason: str,
+        candidates: list[dict[str, Any]] | None = None,
+    ) -> dict[str, Any]:
+        return {
+            "parsed_intent": parsed,
+            "confidence": confidence,
+            "decision": "suggest",
+            "selected_tool": None,
+            "candidates": candidates or [],
+            "missing": missing,
+            "reason": reason,
+            "request": None,
+            "data": None,
+        }
+
+    def _call_natural_tplus_list(
+        self,
+        parsed: dict[str, Any],
+        *,
+        dry_run: bool,
+        filters: dict[str, Any] | None,
+        body_overrides: Any,
+        page_size: int,
+        page_index: int,
+        headers: dict[str, str] | None,
+        query: dict[str, Any] | None,
+        account_alias: str | None,
+    ) -> dict[str, Any]:
+        confidence = self._natural_confidence(
+            parsed,
+            template_found=True,
+            field_confidence=bool(parsed["display_fields"] or filters),
+        )
+        candidate = {
+            "tool": "query_tplus_voucher_list_smart",
+            "product": TCLOUD_PRODUCT_CODE,
+            "action": "list",
+            "module": {},
+            "api_name": None,
+            "path": None,
+            "score": confidence,
+            "reason": "T+ voucher list request resolved from natural input.",
+            "missing": [],
+        }
+        if dry_run:
+            return {
+                "parsed_intent": parsed,
+                "confidence": confidence,
+                "decision": "call",
+                "selected_tool": "query_tplus_voucher_list_smart",
+                "candidates": [candidate],
+                "missing": [],
+                "reason": "Dry run selected T+ voucher list route.",
+                "dry_run": True,
+                "request": {
+                    "tool": "query_tplus_voucher_list_smart",
+                    "voucher_name": parsed["voucher_name"],
+                    "intent": parsed["user_input"],
+                    "filters": filters or parsed["filters"],
+                    "display_fields": parsed["display_fields"],
+                    "page_size": page_size,
+                    "page_index": page_index,
+                },
+                "data": None,
+            }
+
+        result = self.query_tplus_voucher_list_smart(
+            voucher_name=parsed["voucher_name"],
+            intent=parsed["user_input"],
+            filters=filters or parsed["filters"],
+            display_fields=parsed["display_fields"],
+            page_size=page_size,
+            page_index=page_index,
+            body_overrides=body_overrides,
+            headers=headers,
+            query=query,
+            account_alias=account_alias,
+        )
+        return {
+            "parsed_intent": parsed,
+            "confidence": confidence,
+            "decision": "call",
+            "selected_tool": "query_tplus_voucher_list_smart",
+            "candidates": [candidate],
+            "missing": [],
+            "reason": "Called T+ voucher list route.",
+            "dry_run": False,
+            "request": result.get("request"),
+            "data": result.get("data"),
+            "route_result": result,
+        }
+
+    def _call_natural_template(
+        self,
+        parsed: dict[str, Any],
+        *,
+        dry_run: bool,
+        body_overrides: Any,
+        headers: dict[str, str] | None,
+        query: dict[str, Any] | None,
+        account_alias: str | None,
+    ) -> dict[str, Any]:
+        api_name = NATURAL_ACTION_API_NAMES.get(parsed["action"])
+        search_result = self.search_api_templates(
+            query=parsed["business_object"],
+            product=parsed["product"],
+            api_name=api_name,
+            limit=5,
+        )
+        candidates = [
+            self._natural_template_candidate(parsed, template)
+            for template in search_result["templates"]
+        ]
+        candidates.sort(key=lambda item: item["score"], reverse=True)
+        if not candidates:
+            return self._natural_suggestion(
+                parsed,
+                confidence=self._natural_confidence(parsed, template_found=False),
+                missing=["template"],
+                reason="No official API template matched the natural request.",
+            )
+        if (
+            len(candidates) > 1
+            and candidates[0]["score"] - candidates[1]["score"]
+            <= NATURAL_CLOSE_CANDIDATE_DELTA
+        ):
+            return self._natural_suggestion(
+                parsed,
+                confidence=candidates[0]["score"],
+                missing=["template_choice"],
+                reason="Multiple official API templates matched the natural request.",
+                candidates=candidates[:5],
+            )
+
+        selected = candidates[0]
+        if selected["score"] < NATURAL_CALL_THRESHOLD:
+            return self._natural_suggestion(
+                parsed,
+                confidence=selected["score"],
+                missing=selected["missing"],
+                reason="Natural route confidence is below call threshold.",
+                candidates=candidates[:5],
+            )
+        if dry_run:
+            return {
+                "parsed_intent": parsed,
+                "confidence": selected["score"],
+                "decision": "call",
+                "selected_tool": "call_api_smart",
+                "candidates": [selected],
+                "missing": [],
+                "reason": "Dry run selected official API template route.",
+                "dry_run": True,
+                "request": selected["request"],
+                "data": None,
+            }
+
+        module = selected["module"]
+        result = self.call_api_smart(
+            product=parsed["product"],
+            parent_code=module["parent_code"],
+            module_code=module["module_code"],
+            api_name=api_name,
+            fields=parsed["fields"],
+            body_overrides=body_overrides,
+            query=query,
+            headers=headers,
+            account_alias=account_alias,
+        )
+        return {
+            "parsed_intent": parsed,
+            "confidence": selected["score"],
+            "decision": "call",
+            "selected_tool": "call_api_smart",
+            "candidates": [selected],
+            "missing": [],
+            "reason": "Called official API template route.",
+            "dry_run": False,
+            "request": result.get("request"),
+            "data": result.get("data"),
+            "route_result": result,
+        }
+
+    def _natural_template_candidate(
+        self,
+        parsed: dict[str, Any],
+        template: dict[str, Any],
+    ) -> dict[str, Any]:
+        module = template.get("module") or {}
+        score = self._natural_confidence(
+            parsed,
+            template_found=True,
+            field_confidence=bool(
+                parsed.get("fields")
+                or parsed.get("filters")
+                or parsed.get("display_fields")
+            ),
+        )
+        return {
+            "tool": "call_api_smart",
+            "product": parsed["product"],
+            "action": parsed["action"],
+            "module": module,
+            "api_name": template.get("api_name"),
+            "path": template.get("path"),
+            "score": score,
+            "reason": "Official template matched business object and action.",
+            "missing": [],
+            "request": {
+                "product": parsed["product"],
+                "parent_code": module.get("parent_code"),
+                "module_code": module.get("module_code"),
+                "api_name": NATURAL_ACTION_API_NAMES.get(parsed["action"]),
+                "fields": parsed.get("fields"),
+                "path": template.get("path"),
+            },
+        }
 
     def _is_tplus_list_intent(self, intent: str | None) -> bool:
         if intent is None or not str(intent).strip():
