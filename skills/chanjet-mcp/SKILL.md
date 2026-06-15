@@ -1,22 +1,28 @@
 ---
 name: chanjet-mcp
-description: Use when handling Changjie/Chanjet/畅捷通 business API requests through the local MCP server, including T+Cloud/T+, 好业财/HYC/ZPlus, 好生意/HSY, 易代账/YDZ/Finance, or 好会计/HKJ/Accounting queries, creates, updates, voucher lists, field mapping, bizCode, BusinessType, account_alias, or Chinese label-to-code issues.
+description: Use when handling Changjie/Chanjet/畅捷通 business API requests through any configured Chanjet MCP server, including T+Cloud/T+, 好业财/HYC/ZPlus, 好生意/HSY, 易代账/YDZ/Finance, or 好会计/HKJ/Accounting queries, creates, updates, voucher lists, field mapping, bizCode, BusinessType, account_alias, or Chinese label-to-code issues.
 ---
 
 # Chanjet MCP
 
 ## Overview
 
-Use the Chanjet MCP tools as the execution layer. This skill provides the calling strategy so agents pick the safest tool, pass Chinese business labels correctly, and avoid guessing product/module/API details.
+Use the configured Chanjet MCP tools as the execution layer. This skill provides a generic calling strategy so agents pick the safest tool, pass Chinese business labels correctly, and avoid guessing product/module/API details.
+
+## Availability Check
+
+- If Chanjet MCP tools are visible, use them directly.
+- If no Chanjet MCP tools are available, state that the Chanjet MCP server is not configured in this environment and ask the user to install or connect it.
+- If configuration, account, token, or `account_alias` status is uncertain, call `diagnose_config` before business API calls.
+- Do not assume a local repository path, virtualenv path, token file path, or company account alias unless the user or tool output provides it.
 
 ## Default Flow
 
-1. Start with `diagnose_config` if configuration, account, token, or `account_alias` status is uncertain.
-2. For user business requests in natural language, call `call_natural` first.
-3. If `call_natural` returns `decision: "call"`, use its result; do not second-guess the selected tool.
-4. If it returns `decision: "suggest"`, inspect `missing`, `reason`, and `candidates`; ask for the missing product, business object, action, or template choice instead of forcing a call.
-5. For structured calls where product/module/API are known, use `call_api_smart`.
-6. Use `call_api_template` or raw product tools only when the caller needs exact low-level control.
+1. For user business requests in natural language, call `call_natural` first.
+2. If `call_natural` returns `decision: "call"`, use its result; do not second-guess the selected tool.
+3. If it returns `decision: "suggest"`, inspect `missing`, `reason`, and `candidates`; ask for the missing product, business object, action, or template choice instead of forcing a call.
+4. For structured calls where product/module/API are known, use `call_api_smart`.
+5. Use `call_api_template` or raw product tools only when the caller needs exact low-level control.
 
 ## Tool Selection
 
@@ -39,6 +45,7 @@ Use the Chanjet MCP tools as the execution layer. This skill provides the callin
 - For selected response columns, use `display_fields`, for example `["单据编号", "客户", "金额"]`.
 - For raw product calls, Chinese keys in `body` or `query` are converted only when the MCP can match `path` to an official template. Already using real field codes avoids extra template lookup.
 - Do not invent field codes when mapping fails. Use `get_api_call_template`, `search_api_templates`, or field lookup tools to inspect available fields.
+- If the MCP implementation does not support automatic label mapping on raw calls, fall back to `call_api_smart` or inspect templates before calling.
 
 ## T+ Specifics
 
@@ -94,3 +101,4 @@ T+ smart query with display fields:
 - Do not continue after `decision: "suggest"` unless the missing information is obvious from user context.
 - Do not manually translate Chinese labels to guessed English codes; let the MCP template mapper do it.
 - Do not omit `account_alias` when the user clearly wants a specific company/account.
+- Do not claim an API call was made if the MCP server or account configuration is missing.
