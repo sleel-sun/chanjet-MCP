@@ -2295,7 +2295,7 @@ class ChanjetTCloudClient:
             "product_source": product_source,
             "action": action,
             "business_object": business_object,
-            "voucher_name": business_object if action == "list" else None,
+            "voucher_name": None,
             "fields": parsed_fields,
             "filters": filters or {},
             "display_fields": parsed_display_fields,

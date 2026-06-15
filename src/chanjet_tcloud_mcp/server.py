@@ -127,8 +127,10 @@ def call_natural(
     """Route a natural-language request to the safest matching Chanjet tool.
 
     This deterministic router parses product, action, business object, fields,
-    filters, and display columns. It calls only high-confidence routes; otherwise
-    it returns ranked candidates for the LLM/client to inspect.
+    filters, and display columns. Only T+ voucher document list requests use
+    voucher_name/bizCode routing; non-voucher APIs are resolved through official
+    API templates. It calls only high-confidence routes; otherwise it returns
+    ranked candidates for the LLM/client to inspect.
     """
     return client.safe_call_natural(
         user_input=user_input,

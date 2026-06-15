@@ -2089,6 +2089,60 @@ class ClientTests(unittest.TestCase):
             "https://openapi.chanjet.com/tplus/api/v2/ManufactureOrderOpenApi/FindVoucherList",
         )
 
+    def test_call_natural_routes_tplus_non_voucher_list_to_template(self):
+        api_doc = {
+            "result": True,
+            "error": None,
+            "value": {
+                "modulePath": "T+Cloud / 基础档案 / 仓库",
+                "moduleName": "仓库",
+                "documentApiInfoList": [
+                    {
+                        "apiName": "仓库查询",
+                        "apiUrl": "/tplus/api/v2/warehouse/Query",
+                        "requestMethod": "POST",
+                        "requestBody": {"param": {}},
+                    }
+                ],
+            },
+        }
+        client, transport = self.make_client(
+            [
+                {
+                    "result": True,
+                    "error": None,
+                    "value": {
+                        "productCode": "tcloud",
+                        "children": [
+                            {
+                                "moduleCode": "t+jcda",
+                                "moduleName": "基础档案",
+                                "children": [{"moduleCode": "t+ck", "moduleName": "仓库"}],
+                            }
+                        ],
+                    },
+                },
+                api_doc,
+                api_doc,
+                {"code": "0", "data": [{"Code": "WH001"}]},
+            ]
+        )
+
+        result = client.call_natural(user_input="查询仓库", product="tplus")
+
+        self.assertEqual(result["decision"], "call")
+        self.assertEqual(result["selected_tool"], "call_api_smart")
+        self.assertEqual(result["parsed_intent"]["product"], "tcloud")
+        self.assertEqual(result["parsed_intent"]["action"], "list")
+        self.assertEqual(result["parsed_intent"]["business_object"], "仓库")
+        self.assertEqual(result["parsed_intent"]["voucher_name"], None)
+        self.assertEqual(result["request"]["path"], "/tplus/api/v2/warehouse/Query")
+        self.assertEqual(result["data"], {"code": "0", "data": [{"Code": "WH001"}]})
+        self.assertEqual(len(transport.calls), 4)
+        self.assertTrue(
+            all("VoucherAPIService" not in call["url"] for call in transport.calls)
+        )
+
     def test_call_natural_dry_run_returns_hyc_route_without_business_call(self):
         client, transport = self.make_client(
             [

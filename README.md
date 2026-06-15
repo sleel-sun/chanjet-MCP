@@ -155,8 +155,9 @@ Claude 示例：
 推荐客户端流程：
 
 1. 调用 `diagnose_config` 确认配置和账号状态。
-2. 调用 `search_api_templates` 用中文业务词直接查找可调用模板。
-3. 调用 `call_api_smart` 按官方模板自动解析中文字段并路由到对应产品接口。
+2. 用户给出自然语言业务请求时，优先调用 `call_natural`。
+3. 如果 `call_natural` 返回 `decision: "suggest"`，根据候选和缺失信息让用户补充产品、业务对象、动作或字段，不要猜测调用。
+4. 需要更细控制时，调用 `search_api_templates` 用中文业务词查找可调用模板，再调用 `call_api_smart` 按官方模板自动解析中文字段并路由到对应产品接口。
 
 如果客户端需要更细控制，也可以继续使用旧流程：先调用 `search_*_docs` 找模块，再调用 `get_api_call_template` 生成模板，最后按模板调用 `call_api_template`、`call_tplus_api`、`call_hyc_api`、`call_hsy_api`、`call_ydz_api` 或 `call_hkj_api`。
 
@@ -452,8 +453,8 @@ Claude 示例：
 1. 高置信度才调用业务接口。
 2. `dry_run=true` 时只返回将要调用的工具和请求草案。
 3. 产品缺失、多产品可选、多模板接近或字段无法匹配时返回 `decision: "suggest"`，不会调用业务接口。
-4. T+ 单据列表请求会路由到 `query_tplus_voucher_list_smart`。
-5. 其他产品的明确单模板请求会路由到 `call_api_smart`。
+4. 只有 T+ 单据列表请求会路由到 `query_tplus_voucher_list_smart`，并使用 `voucher_name` / `bizCode` 解析。
+5. T+ 非单据接口（例如仓库、客户、存货等基础档案）和其他产品的明确单模板请求会路由到 `call_api_smart`，不要强行按单据 `bizCode` 处理。
 
 `call_api_smart`
 
