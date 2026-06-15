@@ -239,6 +239,8 @@ def call_api_template(
 ) -> dict[str, Any]:
     """Find an official API template and route the call to the right product tool.
 
+    Chinese field labels in body/query and field-selection arrays are resolved
+    through the matched official template before the request is sent.
     For T+ calls, if the request needs a voucher bizCode or BusinessType and
     the exact code is unknown, call get_tplus_reference_codes first.
     """
@@ -339,6 +341,8 @@ def call_tplus_api(
 ) -> Any:
     """Call an arbitrary T+ OpenAPI path using configured Chanjet credentials.
 
+    If body/query contains Chinese field labels, the service tries to match path
+    to the official T+ template and convert labels to field codes first.
     If the request body needs BusinessType and the exact code is unknown,
     call get_tplus_reference_codes first and use a business_types code.
     """
@@ -433,7 +437,11 @@ def call_hyc_api(
     headers: dict[str, str] | None = None,
     account_alias: str | None = None,
 ) -> Any:
-    """Call an arbitrary HYC/ZPlus OpenAPI path using configured credentials."""
+    """Call an arbitrary HYC/ZPlus OpenAPI path using configured credentials.
+
+    If body/query contains Chinese field labels, path is matched to the official
+    template and labels are converted to field codes before the request is sent.
+    """
     return client.call_hyc_api(
         path=path,
         method=method,
@@ -453,7 +461,11 @@ def call_hsy_api(
     headers: dict[str, str] | None = None,
     account_alias: str | None = None,
 ) -> Any:
-    """Call an arbitrary HSY OpenAPI path using configured credentials."""
+    """Call an arbitrary HSY OpenAPI path using configured credentials.
+
+    If body/query contains Chinese field labels, path is matched to the official
+    template and labels are converted to field codes before the request is sent.
+    """
     return client.call_hsy_api(
         path=path,
         method=method,
@@ -473,7 +485,11 @@ def call_ydz_api(
     headers: dict[str, str] | None = None,
     account_alias: str | None = None,
 ) -> Any:
-    """Call an arbitrary YDZ/Finance OpenAPI path using configured credentials."""
+    """Call an arbitrary YDZ/Finance OpenAPI path using configured credentials.
+
+    If body/query contains Chinese field labels, path is matched to the official
+    template and labels are converted to field codes before the request is sent.
+    """
     return client.call_ydz_api(
         path=path,
         method=method,
@@ -493,7 +509,11 @@ def call_hkj_api(
     headers: dict[str, str] | None = None,
     account_alias: str | None = None,
 ) -> Any:
-    """Call an arbitrary HKJ/Accounting OpenAPI path using configured credentials."""
+    """Call an arbitrary HKJ/Accounting OpenAPI path using configured credentials.
+
+    If body/query contains Chinese field labels, path is matched to the official
+    template and labels are converted to field codes before the request is sent.
+    """
     return client.call_hkj_api(
         path=path,
         method=method,

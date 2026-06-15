@@ -38,6 +38,12 @@ TPLUS_VOUCHER_BIZ_CODE_FALLBACKS = {
 TPLUS_MODULE_CODE_ALIASES = {
     "manufactureorderopenapi": "module_code looks like an API implementation alias, so voucher_name search was used",
 }
+DOC_MODULE_HINT_ALIASES = {
+    "base": ("基础档案", "基础资料", "jcda"),
+    "basic": ("基础档案", "基础资料", "jcda"),
+    "basicdata": ("基础档案", "基础资料", "jcda"),
+    "warehouse": ("仓库", "ck"),
+}
 VOUCHER_FIELD_SELECTION_KEYS = {"selectfields", "fields", "columns", "select"}
 REFERENCE_CODE_KEYS = (
     "code",
@@ -683,6 +689,14 @@ class ChanjetTCloudClient:
             request_args["headers"] = headers
         if account_alias is not None:
             request_args["account_alias"] = account_alias
+        request_args["body"] = self._normalize_request_labels_from_template(
+            request_args.get("body"),
+            template,
+        )
+        request_args["query"] = self._normalize_request_labels_from_template(
+            request_args.get("query"),
+            template,
+        )
 
         response = self._call_api_by_product(
             template_result["product"]["code"],
@@ -719,10 +733,22 @@ class ChanjetTCloudClient:
         filters: dict[str, Any] | None = None,
         display_fields: list[str] | None = None,
     ) -> dict[str, Any]:
-        template_result = self.get_api_call_template(
+        module_resolution = self._resolve_smart_module_hints(
             product=product,
             parent_code=parent_code,
             module_code=module_code,
+            hints=[voucher_name, business_type_name],
+        )
+        resolved_parent_code = (
+            module_resolution["parent_code"] if module_resolution else parent_code
+        )
+        resolved_module_code = (
+            module_resolution["module_code"] if module_resolution else module_code
+        )
+        template_result = self.get_api_call_template(
+            product=product,
+            parent_code=resolved_parent_code,
+            module_code=resolved_module_code,
             api_name=api_name,
         )
         if not template_result["templates"]:
@@ -755,17 +781,44 @@ class ChanjetTCloudClient:
 
         tplus_resolved: dict[str, Any] = {}
         if template_result["product"]["code"] == TCLOUD_PRODUCT_CODE:
-            body, tplus_resolved = self._apply_tplus_smart_fields(
+            (
+                body,
+                generic_tplus_resolved,
+                generic_consumed,
+            ) = self._apply_tplus_template_fields(
                 body=body,
-                voucher_name=voucher_name,
-                biz_code=biz_code,
-                business_type_name=business_type_name,
-                business_type=business_type,
+                template=template,
                 filters=filters,
                 display_fields=display_fields,
-                headers=headers,
-                account_alias=account_alias,
             )
+            remaining_filters = None if generic_consumed["filters"] else filters
+            remaining_display_fields = (
+                None if generic_consumed["display_fields"] else display_fields
+            )
+            should_apply_voucher_fields = bool(
+                biz_code
+                or business_type
+                or remaining_filters
+                or remaining_display_fields
+                or (
+                    (voucher_name or business_type_name)
+                    and not module_resolution
+                    and not generic_consumed["display_fields"]
+                )
+            )
+            if should_apply_voucher_fields:
+                body, tplus_resolved = self._apply_tplus_smart_fields(
+                    body=body,
+                    voucher_name=voucher_name,
+                    biz_code=biz_code,
+                    business_type_name=business_type_name,
+                    business_type=business_type,
+                    filters=remaining_filters,
+                    display_fields=remaining_display_fields,
+                    headers=headers,
+                    account_alias=account_alias,
+                )
+            tplus_resolved = {**generic_tplus_resolved, **tplus_resolved}
 
         if body_overrides is not None:
             body = self._deep_merge_values(body, body_overrides)
@@ -786,6 +839,8 @@ class ChanjetTCloudClient:
             "matched_fields": matched_fields,
             "unmatched_fields": unmatched_fields,
         }
+        if module_resolution:
+            resolved["module_resolution"] = module_resolution
         resolved.update(tplus_resolved)
         return {
             "template": template,
@@ -1122,6 +1177,13 @@ class ChanjetTCloudClient:
         headers: dict[str, str] | None = None,
         account_alias: str | None = None,
     ) -> Any:
+        body, query = self._normalize_request_labels_from_path(
+            TCLOUD_PRODUCT_CODE,
+            path=path,
+            method=method,
+            body=body,
+            query=query,
+        )
         return self.call_chanjet_api(
             path=path,
             method=method,
@@ -1469,6 +1531,13 @@ class ChanjetTCloudClient:
         headers: dict[str, str] | None = None,
         account_alias: str | None = None,
     ) -> Any:
+        body, query = self._normalize_request_labels_from_path(
+            HYC_PRODUCT_CODE,
+            path=path,
+            method=method,
+            body=body,
+            query=query,
+        )
         return self.call_chanjet_api(
             path=path,
             method=method,
@@ -1488,6 +1557,13 @@ class ChanjetTCloudClient:
         headers: dict[str, str] | None = None,
         account_alias: str | None = None,
     ) -> Any:
+        body, query = self._normalize_request_labels_from_path(
+            HSY_PRODUCT_CODE,
+            path=path,
+            method=method,
+            body=body,
+            query=query,
+        )
         return self.call_chanjet_api(
             path=path,
             method=method,
@@ -1507,6 +1583,13 @@ class ChanjetTCloudClient:
         headers: dict[str, str] | None = None,
         account_alias: str | None = None,
     ) -> Any:
+        body, query = self._normalize_request_labels_from_path(
+            YDZ_PRODUCT_CODE,
+            path=path,
+            method=method,
+            body=body,
+            query=query,
+        )
         return self.call_chanjet_api(
             path=path,
             method=method,
@@ -1526,6 +1609,13 @@ class ChanjetTCloudClient:
         headers: dict[str, str] | None = None,
         account_alias: str | None = None,
     ) -> Any:
+        body, query = self._normalize_request_labels_from_path(
+            HKJ_PRODUCT_CODE,
+            path=path,
+            method=method,
+            body=body,
+            query=query,
+        )
         return self.call_chanjet_api(
             path=path,
             method=method,
@@ -1772,6 +1862,359 @@ class ChanjetTCloudClient:
             return merged
         return copy.deepcopy(override)
 
+    def _normalize_request_labels_from_path(
+        self,
+        product_code: str,
+        *,
+        path: str,
+        method: str,
+        body: Any,
+        query: dict[str, Any] | None,
+    ) -> tuple[Any, dict[str, Any] | None]:
+        if not (
+            self._request_needs_label_resolution(body)
+            or self._request_needs_label_resolution(query)
+        ):
+            return body, query
+
+        template = self._find_api_template_by_path(
+            product_code,
+            path=path,
+            method=method,
+        )
+        if template is None:
+            return body, query
+
+        return (
+            self._normalize_request_labels_from_template(body, template),
+            self._normalize_request_labels_from_template(query, template),
+        )
+
+    def _find_api_template_by_path(
+        self,
+        product_code: str,
+        *,
+        path: str,
+        method: str | None,
+    ) -> dict[str, Any] | None:
+        normalized_path = self._normalize_api_path(path)
+        if normalized_path is None:
+            return None
+        normalized_method = str(method or "").upper()
+        module_tree = self.list_modules(product_code)
+
+        for parent in module_tree.get("children") or []:
+            parent_code = parent.get("moduleCode")
+            if not parent_code:
+                continue
+            for child in parent.get("children") or []:
+                module_code = child.get("moduleCode")
+                if not module_code:
+                    continue
+                template_result = self.get_api_call_template(
+                    product=product_code,
+                    parent_code=str(parent_code),
+                    module_code=str(module_code),
+                )
+                for template in template_result["templates"]:
+                    if template.get("path") != normalized_path:
+                        continue
+                    template_method = str(template.get("method") or "").upper()
+                    if normalized_method and template_method != normalized_method:
+                        continue
+                    return template
+        return None
+
+    def _normalize_request_labels_from_template(
+        self,
+        value: Any,
+        template: dict[str, Any],
+    ) -> Any:
+        if not self._request_needs_label_resolution(value):
+            return value
+        field_map = self._template_field_code_map(template)
+        if not field_map:
+            return value
+        return self._normalize_request_label_value(value, field_map)
+
+    def _template_field_code_map(
+        self,
+        template: dict[str, Any],
+    ) -> dict[str, str]:
+        return {
+            normalized: str(match["field"])
+            for normalized, match in self._smart_field_aliases(template).items()
+            if normalized and match.get("field") is not None
+        }
+
+    def _normalize_request_label_value(
+        self,
+        value: Any,
+        field_map: dict[str, str],
+        *,
+        in_field_selection: bool = False,
+    ) -> Any:
+        if isinstance(value, dict):
+            normalized_value: dict[Any, Any] = {}
+            for key, item in value.items():
+                key_text = str(key)
+                key_match = field_map.get(self._normalize_match_value(key_text))
+                normalized_key = key_match if key_match is not None else key
+                child_in_field_selection = (
+                    key_text.casefold() in VOUCHER_FIELD_SELECTION_KEYS
+                    or str(normalized_key).casefold() in VOUCHER_FIELD_SELECTION_KEYS
+                )
+                normalized_value[normalized_key] = self._normalize_request_label_value(
+                    item,
+                    field_map,
+                    in_field_selection=child_in_field_selection,
+                )
+            return normalized_value
+
+        if isinstance(value, list):
+            return [
+                self._normalize_request_label_value(
+                    item,
+                    field_map,
+                    in_field_selection=in_field_selection,
+                )
+                for item in value
+            ]
+
+        if in_field_selection:
+            match = field_map.get(self._normalize_match_value(value))
+            if match is not None:
+                return match
+        return copy.deepcopy(value)
+
+    def _request_needs_label_resolution(self, value: Any) -> bool:
+        if isinstance(value, dict):
+            for key, item in value.items():
+                key_text = str(key)
+                if self._contains_non_ascii(key_text):
+                    return True
+                if (
+                    key_text.casefold() in VOUCHER_FIELD_SELECTION_KEYS
+                    and self._selection_value_needs_label_resolution(item)
+                ):
+                    return True
+                if self._request_needs_label_resolution(item):
+                    return True
+            return False
+        if isinstance(value, list):
+            return any(self._request_needs_label_resolution(item) for item in value)
+        return False
+
+    def _selection_value_needs_label_resolution(self, value: Any) -> bool:
+        if isinstance(value, list):
+            return any(self._selection_value_needs_label_resolution(item) for item in value)
+        if isinstance(value, dict):
+            return self._request_needs_label_resolution(value)
+        return self._contains_non_ascii(str(value))
+
+    def _contains_non_ascii(self, value: str) -> bool:
+        return any(ord(char) > 127 for char in value)
+
+    def _resolve_smart_module_hints(
+        self,
+        *,
+        product: str,
+        parent_code: str,
+        module_code: str,
+        hints: list[Any],
+    ) -> dict[str, str] | None:
+        metadata = self._product_metadata(product)
+        if not self._should_resolve_module_hints(
+            metadata["code"],
+            parent_code,
+            module_code,
+            hints,
+        ):
+            return None
+
+        search_hints = [parent_code, module_code, *hints]
+        expanded_hints = self._expanded_module_hints(search_hints)
+        if not expanded_hints:
+            return None
+
+        module_tree = self.list_modules(metadata["code"])
+        best_score = 0
+        best_matches: list[dict[str, str]] = []
+        for parent in module_tree.get("children") or []:
+            parent_info = {
+                "code": str(parent.get("moduleCode") or ""),
+                "name": str(parent.get("moduleName") or ""),
+            }
+            for child in parent.get("children") or []:
+                child_info = {
+                    "code": str(child.get("moduleCode") or ""),
+                    "name": str(child.get("moduleName") or ""),
+                }
+                score = self._score_module_hint_match(
+                    expanded_hints,
+                    parent_info=parent_info,
+                    child_info=child_info,
+                )
+                if score <= 0:
+                    continue
+                candidate = {
+                    "input_parent_code": parent_code,
+                    "input_module_code": module_code,
+                    "parent_code": parent_info["code"],
+                    "module_code": child_info["code"],
+                    "parent_name": parent_info["name"],
+                    "module_name": child_info["name"],
+                }
+                if score > best_score:
+                    best_score = score
+                    best_matches = [candidate]
+                elif score == best_score:
+                    best_matches.append(candidate)
+
+        if len(best_matches) != 1:
+            return None
+        return best_matches[0]
+
+    def _should_resolve_module_hints(
+        self,
+        product_code: str,
+        parent_code: str,
+        module_code: str,
+        hints: list[Any],
+    ) -> bool:
+        if product_code != TCLOUD_PRODUCT_CODE:
+            return False
+
+        parent_text = str(parent_code or "").strip()
+        module_text = str(module_code or "").strip()
+        if not parent_text or not module_text:
+            return False
+
+        normalized_parent = self._normalize_match_value(parent_text)
+        normalized_module = self._normalize_match_value(module_text)
+        product_aliases = {
+            self._normalize_match_value(alias)
+            for alias, code in NATURAL_PRODUCT_ALIASES.items()
+            if code == product_code
+        }
+        if normalized_parent in product_aliases:
+            return True
+        if normalized_module in DOC_MODULE_HINT_ALIASES:
+            return True
+        if not parent_text.casefold().startswith("t+") and any(
+            str(hint or "").strip() for hint in hints
+        ):
+            return True
+        return False
+
+    def _expanded_module_hints(self, hints: list[Any]) -> list[str]:
+        expanded: list[str] = []
+        for hint in hints:
+            if hint is None:
+                continue
+            text = str(hint).strip()
+            if not text:
+                continue
+            candidates = [text]
+            normalized = self._normalize_match_value(text)
+            candidates.extend(DOC_MODULE_HINT_ALIASES.get(normalized, ()))
+            if text.endswith("档案") and len(text) > 2:
+                candidates.append(text[: -len("档案")])
+            for candidate in candidates:
+                candidate_text = str(candidate).strip()
+                if candidate_text and candidate_text not in expanded:
+                    expanded.append(candidate_text)
+        return expanded
+
+    def _score_module_hint_match(
+        self,
+        hints: list[str],
+        *,
+        parent_info: dict[str, str],
+        child_info: dict[str, str],
+    ) -> int:
+        parent_values = [parent_info["code"], parent_info["name"]]
+        child_values = [child_info["code"], child_info["name"]]
+        score = 0
+        for hint in hints:
+            normalized_hint = self._normalize_match_value(hint)
+            if not normalized_hint:
+                continue
+            if self._module_values_match(normalized_hint, child_values):
+                score += 4
+            if self._module_values_match(normalized_hint, parent_values):
+                score += 2
+        return score
+
+    def _module_values_match(self, normalized_hint: str, values: list[str]) -> bool:
+        for value in values:
+            normalized_value = self._normalize_match_value(value)
+            if not normalized_value:
+                continue
+            if (
+                normalized_hint == normalized_value
+                or normalized_hint in normalized_value
+                or normalized_value in normalized_hint
+            ):
+                return True
+        return False
+
+    def _apply_tplus_template_fields(
+        self,
+        *,
+        body: Any,
+        template: dict[str, Any],
+        filters: dict[str, Any] | None,
+        display_fields: list[str] | None,
+    ) -> tuple[Any, dict[str, Any], dict[str, bool]]:
+        resolved: dict[str, Any] = {}
+        consumed = {"filters": False, "display_fields": False}
+
+        if filters:
+            candidate_body, matched_filters, unmatched_filters = (
+                self._inject_smart_fields(body, filters, template)
+            )
+            if matched_filters and not unmatched_filters:
+                body = candidate_body
+                consumed["filters"] = True
+                resolved["matched_filter_fields"] = [
+                    {"requested": item["requested"], "field": item["field"]}
+                    for item in matched_filters
+                ]
+
+        if display_fields:
+            matched_display_fields, unmatched_display_fields = (
+                self._match_template_display_fields(display_fields, template)
+            )
+            if matched_display_fields and not unmatched_display_fields:
+                body = self._inject_display_fields(
+                    body,
+                    [field["field"] for field in matched_display_fields],
+                )
+                consumed["display_fields"] = True
+                resolved["matched_display_fields"] = matched_display_fields
+
+        return body, resolved, consumed
+
+    def _match_template_display_fields(
+        self,
+        display_fields: list[str],
+        template: dict[str, Any],
+    ) -> tuple[list[dict[str, str]], list[str]]:
+        aliases = self._smart_field_aliases(template)
+        matched_fields: list[dict[str, str]] = []
+        unmatched_fields: list[str] = []
+        for requested in display_fields:
+            requested_text = str(requested).strip()
+            match = aliases.get(self._normalize_match_value(requested_text))
+            if match is None:
+                unmatched_fields.append(requested_text)
+                continue
+            matched_fields.append(
+                {"requested": requested_text, "field": str(match["field"])}
+            )
+        return matched_fields, unmatched_fields
+
     def _apply_tplus_smart_fields(
         self,
         *,
@@ -1931,6 +2374,12 @@ class ChanjetTCloudClient:
 
     def _smart_field_aliases(self, template: dict[str, Any]) -> dict[str, dict[str, Any]]:
         aliases: dict[str, dict[str, Any]] = {}
+        body = template.get("body")
+        default_parent = (
+            ["param"]
+            if isinstance(body, dict) and isinstance(body.get("param"), dict)
+            else []
+        )
 
         def register(path: list[str], field: str, labels: list[Any]) -> None:
             if not path or not field:
@@ -1959,7 +2408,7 @@ class ChanjetTCloudClient:
             ]
             if field is not None:
                 field_text = str(field).strip()
-                path = [*current_path, field_text] if current_path else [field_text]
+                path = [*default_parent, *current_path, field_text]
                 register(path, field_text, labels)
 
             for key, value in item.items():
@@ -1971,9 +2420,7 @@ class ChanjetTCloudClient:
                     collect(value, current_path)
 
         collect(template.get("raw", template))
-        body = template.get("body")
         if isinstance(body, dict):
-            default_parent = ["param"] if isinstance(body.get("param"), dict) else []
             for key in body.get("param", body).keys():
                 field_path = [*default_parent, str(key)]
                 register(field_path, str(key), [])
@@ -2595,6 +3042,8 @@ class ChanjetTCloudClient:
             module_code=module["module_code"],
             api_name=api_name,
             fields=parsed["fields"],
+            filters=parsed["filters"],
+            display_fields=parsed["display_fields"],
             body_overrides=body_overrides,
             query=query,
             headers=headers,

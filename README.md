@@ -31,6 +31,16 @@ python3 -m venv .venv
 .venv/bin/python -m pip install -e .
 ```
 
+## 配套 Skill
+
+仓库内置 Codex 配套 skill：`skills/chanjet-mcp`。它不是 MCP 服务本体，而是给 Agent 的调用策略说明，覆盖 `call_natural`、`call_api_smart`、T+ `bizCode` / `BusinessType`、`filters`、`display_fields` 和中文 label 自动转字段 code 的使用规则。
+
+如需安装到本机 Codex 技能目录：
+
+```bash
+cp -R skills/chanjet-mcp ~/.codex/skills/
+```
+
 ## 配置
 
 复制 `.env.example` 为 `.env`，填写畅捷通开放平台配置：
@@ -586,6 +596,7 @@ Claude 示例：
 `call_api_template`
 
 根据官方文档模板自动选择对应产品调用工具。客户端只需要提供产品、模块编码、可选接口名和业务参数，不需要自己选择 `call_tplus_api` / `call_hyc_api` 等底层工具。
+如果 `body` 或 `query` 里使用了官方字段说明里的中文字段名，服务会按模板自动转换成真实字段编码；`selectFields`、`fields`、`columns`、`select` 里的中文字段名也会同步转换。
 
 参数：
 
@@ -813,6 +824,8 @@ Claude 示例：
 }
 ```
 
+如果 `body` 或 `query` 包含中文字段名，服务会尝试用 `path` 匹配对应产品的官方接口模板，并在发送前把中文字段名转换成真实字段编码。已经使用真实字段编码的请求不会额外查询模板。
+
 服务会自动注入：
 
 ```json
@@ -949,7 +962,7 @@ Claude 示例：
 }
 ```
 
-服务会自动注入与 T+Cloud 相同的畅捷通开放平台请求头。
+服务会自动注入与 T+Cloud 相同的畅捷通开放平台请求头。`body` 或 `query` 包含中文字段名时，也会按 `path` 匹配官方模板并自动转换成真实字段编码。
 
 `call_hsy_api`
 
@@ -967,7 +980,7 @@ Claude 示例：
 }
 ```
 
-服务会自动注入与 T+Cloud 相同的畅捷通开放平台请求头。好生意官方文档当前可能还没有模块树，具体业务路径以官方文档后续返回为准。
+服务会自动注入与 T+Cloud 相同的畅捷通开放平台请求头。`body` 或 `query` 包含中文字段名时，也会按 `path` 匹配官方模板并自动转换成真实字段编码。好生意官方文档当前可能还没有模块树，具体业务路径以官方文档后续返回为准。
 
 `call_ydz_api`
 
@@ -989,7 +1002,7 @@ Claude 示例：
 }
 ```
 
-服务会自动注入与 T+Cloud 相同的畅捷通开放平台请求头。
+服务会自动注入与 T+Cloud 相同的畅捷通开放平台请求头。`body` 或 `query` 包含中文字段名时，也会按 `path` 匹配官方模板并自动转换成真实字段编码。
 
 `call_hkj_api`
 
@@ -1011,7 +1024,7 @@ Claude 示例：
 }
 ```
 
-服务会自动注入与 T+Cloud 相同的畅捷通开放平台请求头。
+服务会自动注入与 T+Cloud 相同的畅捷通开放平台请求头。`body` 或 `query` 包含中文字段名时，也会按 `path` 匹配官方模板并自动转换成真实字段编码。
 
 `get_auth_url`
 

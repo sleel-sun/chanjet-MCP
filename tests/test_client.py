@@ -1402,6 +1402,47 @@ class ClientTests(unittest.TestCase):
             {"param": {"Code": "01"}},
         )
 
+    def test_call_api_template_resolves_chinese_body_labels(self):
+        client, transport = self.make_client(
+            [
+                {
+                    "result": True,
+                    "error": None,
+                    "value": {
+                        "modulePath": "T+Cloud / 基础档案 / 仓库",
+                        "moduleName": "仓库",
+                        "documentApiInfoList": [
+                            {
+                                "apiName": "仓库查询",
+                                "apiUrl": "/tplus/api/v2/warehouse/Query",
+                                "requestMethod": "POST",
+                                "requestBody": {"param": {}},
+                                "requestParams": [
+                                    {"field": "Code", "name": "编码"},
+                                    {"field": "Name", "name": "名称"},
+                                ],
+                            }
+                        ],
+                    },
+                },
+                {"code": "0", "data": [{"Code": "WH001", "Name": "上海仓"}]},
+            ]
+        )
+
+        result = client.call_api_template(
+            product="tplus",
+            parent_code="t+jcda",
+            module_code="t+ck",
+            api_name="查询",
+            body={"param": {"编码": "WH001", "selectFields": ["编码", "名称"]}},
+        )
+
+        expected_body = {
+            "param": {"Code": "WH001", "selectFields": ["Code", "Name"]}
+        }
+        self.assertEqual(result["request"]["body"], expected_body)
+        self.assertEqual(transport.calls[1]["json_body"], expected_body)
+
     def test_call_api_smart_resolves_chinese_fields_for_hyc_template(self):
         client, transport = self.make_client(
             [
@@ -1686,6 +1727,104 @@ class ClientTests(unittest.TestCase):
         self.assertEqual(result["resolved"]["product_code"], "tcloud")
         self.assertEqual(result["resolved"]["biz_code"], "SA04")
         self.assertEqual(result["resolved"]["business_type"], "02")
+
+    def test_call_tplus_api_smart_resolves_human_module_hints_and_display_fields(self):
+        client, transport = self.make_client(
+            [
+                {
+                    "result": True,
+                    "error": None,
+                    "value": {
+                        "productCode": "tcloud",
+                        "children": [
+                            {
+                                "moduleCode": "t+jcda",
+                                "moduleName": "基础档案",
+                                "children": [
+                                    {"moduleCode": "t+ck", "moduleName": "仓库"}
+                                ],
+                            }
+                        ],
+                    },
+                },
+                {
+                    "result": True,
+                    "error": None,
+                    "value": {
+                        "modulePath": "T+Cloud / 基础档案 / 仓库",
+                        "moduleName": "仓库",
+                        "documentApiInfoList": [
+                            {
+                                "apiName": "仓库查询",
+                                "apiUrl": "/tplus/api/v2/warehouse/Query",
+                                "requestMethod": "POST",
+                                "requestBody": {"param": {}},
+                                "requestParams": [
+                                    {"field": "Code", "name": "编码"},
+                                    {"field": "Name", "name": "名称"},
+                                    {"field": "Address", "name": "地址"},
+                                    {"field": "Disabled", "name": "是否停用"},
+                                ],
+                            }
+                        ],
+                    },
+                },
+                {
+                    "code": "0",
+                    "data": [
+                        {
+                            "Code": "WH001",
+                            "Name": "上海仓",
+                            "Address": "上海",
+                            "Disabled": False,
+                        }
+                    ],
+                },
+            ]
+        )
+
+        result = client.call_tplus_api_smart(
+            parent_code="TPlus",
+            module_code="Base",
+            voucher_name="仓库档案",
+            business_type_name="仓库",
+            filters={},
+            display_fields=["编码", "名称", "地址", "是否停用"],
+        )
+
+        self.assertEqual(result["template"]["api_name"], "仓库查询")
+        self.assertEqual(
+            result["request"]["body"],
+            {"param": {"selectFields": ["Code", "Name", "Address", "Disabled"]}},
+        )
+        self.assertEqual(
+            result["resolved"]["matched_display_fields"],
+            [
+                {"requested": "编码", "field": "Code"},
+                {"requested": "名称", "field": "Name"},
+                {"requested": "地址", "field": "Address"},
+                {"requested": "是否停用", "field": "Disabled"},
+            ],
+        )
+        self.assertEqual(
+            result["resolved"]["module_resolution"],
+            {
+                "input_parent_code": "TPlus",
+                "input_module_code": "Base",
+                "parent_code": "t+jcda",
+                "module_code": "t+ck",
+                "parent_name": "基础档案",
+                "module_name": "仓库",
+            },
+        )
+        self.assertEqual(
+            [call["url"] for call in transport.calls],
+            [
+                "https://openapi.chanjet.com/developer/api/doc-center/modulesNameByCode/tcloud",
+                "https://openapi.chanjet.com/developer/api/doc-center/details/tcloud/t%2Bjcda/t%2Bck",
+                "https://openapi.chanjet.com/tplus/api/v2/warehouse/Query",
+            ],
+        )
 
     def test_call_tplus_api_smart_uses_template_and_resolves_natural_inputs(self):
         client, transport = self.make_client(
@@ -2142,6 +2281,63 @@ class ClientTests(unittest.TestCase):
         self.assertTrue(
             all("VoucherAPIService" not in call["url"] for call in transport.calls)
         )
+
+    def test_call_natural_template_route_forwards_filters_and_display_fields(self):
+        api_doc = {
+            "result": True,
+            "error": None,
+            "value": {
+                "modulePath": "T+Cloud / 基础档案 / 仓库",
+                "moduleName": "仓库",
+                "documentApiInfoList": [
+                    {
+                        "apiName": "仓库查询",
+                        "apiUrl": "/tplus/api/v2/warehouse/Query",
+                        "requestMethod": "POST",
+                        "requestBody": {"param": {}},
+                        "requestParams": [
+                            {"field": "Code", "name": "编码"},
+                            {"field": "Name", "name": "名称"},
+                        ],
+                    }
+                ],
+            },
+        }
+        client, transport = self.make_client(
+            [
+                {
+                    "result": True,
+                    "error": None,
+                    "value": {
+                        "productCode": "tcloud",
+                        "children": [
+                            {
+                                "moduleCode": "t+jcda",
+                                "moduleName": "基础档案",
+                                "children": [{"moduleCode": "t+ck", "moduleName": "仓库"}],
+                            }
+                        ],
+                    },
+                },
+                api_doc,
+                api_doc,
+                {"code": "0", "data": [{"Code": "WH001", "Name": "上海仓"}]},
+            ]
+        )
+
+        result = client.call_natural(
+            user_input="查询仓库，显示编码和名称",
+            product="tplus",
+            filters={"编码": "WH001"},
+        )
+
+        expected_body = {
+            "param": {"Code": "WH001", "selectFields": ["Code", "Name"]}
+        }
+        self.assertEqual(result["decision"], "call")
+        self.assertEqual(result["selected_tool"], "call_api_smart")
+        self.assertEqual(result["request"]["body"], expected_body)
+        self.assertEqual(transport.calls[-1]["json_body"], expected_body)
 
     def test_call_natural_dry_run_returns_hyc_route_without_business_call(self):
         client, transport = self.make_client(
@@ -2744,6 +2940,124 @@ class ClientTests(unittest.TestCase):
                 token_store.get_account("company-a")["open_token"],
                 "refreshed-open-token",
             )
+
+    def test_call_tplus_api_resolves_chinese_body_labels_from_path_template(self):
+        client, transport = self.make_client(
+            [
+                {
+                    "result": True,
+                    "error": None,
+                    "value": {
+                        "productCode": "tcloud",
+                        "children": [
+                            {
+                                "moduleCode": "t+jcda",
+                                "moduleName": "基础档案",
+                                "children": [{"moduleCode": "t+ck", "moduleName": "仓库"}],
+                            }
+                        ],
+                    },
+                },
+                {
+                    "result": True,
+                    "error": None,
+                    "value": {
+                        "modulePath": "T+Cloud / 基础档案 / 仓库",
+                        "moduleName": "仓库",
+                        "documentApiInfoList": [
+                            {
+                                "apiName": "仓库查询",
+                                "apiUrl": "/tplus/api/v2/warehouse/Query",
+                                "requestMethod": "POST",
+                                "requestBody": {"param": {}},
+                                "requestParams": [
+                                    {"field": "Code", "name": "编码"},
+                                    {"field": "Name", "name": "名称"},
+                                ],
+                            }
+                        ],
+                    },
+                },
+                {"code": "0", "data": [{"Code": "WH001", "Name": "上海仓"}]},
+            ]
+        )
+
+        result = client.call_tplus_api(
+            "/tplus/api/v2/warehouse/Query",
+            body={"param": {"编码": "WH001", "selectFields": ["编码", "名称"]}},
+        )
+
+        expected_body = {
+            "param": {"Code": "WH001", "selectFields": ["Code", "Name"]}
+        }
+        self.assertEqual(result, {"code": "0", "data": [{"Code": "WH001", "Name": "上海仓"}]})
+        self.assertEqual(transport.calls[-1]["json_body"], expected_body)
+        self.assertEqual(
+            [call["url"] for call in transport.calls],
+            [
+                "https://openapi.chanjet.com/developer/api/doc-center/modulesNameByCode/tcloud",
+                "https://openapi.chanjet.com/developer/api/doc-center/details/tcloud/t%2Bjcda/t%2Bck",
+                "https://openapi.chanjet.com/tplus/api/v2/warehouse/Query",
+            ],
+        )
+
+    def test_call_hyc_api_resolves_chinese_body_labels_from_path_template(self):
+        client, transport = self.make_client(
+            [
+                {
+                    "result": True,
+                    "error": None,
+                    "value": {
+                        "productCode": "zplus",
+                        "children": [
+                            {
+                                "moduleCode": "zjjcda",
+                                "moduleName": "基础档案",
+                                "children": [{"moduleCode": "ck", "moduleName": "仓库"}],
+                            }
+                        ],
+                    },
+                },
+                {
+                    "result": True,
+                    "error": None,
+                    "value": {
+                        "modulePath": "好业财 / 基础档案 / 仓库",
+                        "moduleName": "仓库",
+                        "documentApiInfoList": [
+                            {
+                                "apiName": "仓库新增",
+                                "apiUrl": "/accounting/openapi/cc/warehouse/create/123",
+                                "requestMethod": "POST",
+                                "requestBody": {"code": "", "name": ""},
+                                "requestParams": [
+                                    {"field": "code", "name": "编码"},
+                                    {"field": "name", "name": "名称"},
+                                ],
+                            }
+                        ],
+                    },
+                },
+                {"code": "0", "data": {"id": "WH001"}},
+            ]
+        )
+
+        result = client.call_hyc_api(
+            "/accounting/openapi/cc/warehouse/create/123",
+            body={"编码": "WH001", "名称": "上海仓"},
+        )
+
+        expected_body = {"code": "WH001", "name": "上海仓"}
+        self.assertEqual(result, {"code": "0", "data": {"id": "WH001"}})
+        self.assertEqual(transport.calls[-1]["json_body"], expected_body)
+        self.assertEqual(
+            [call["url"] for call in transport.calls],
+            [
+                "https://openapi.chanjet.com/developer/api/doc-center/modulesNameByCode/zplus",
+                "https://openapi.chanjet.com/developer/api/doc-center/details/zplus/zjjcda/ck",
+                "https://openapi.chanjet.com/accounting/openapi/cc/warehouse/create/123",
+            ],
+        )
 
     def test_call_api_refreshes_once_and_retries_expired_token_response(self):
         with tempfile.TemporaryDirectory() as tmp_dir:

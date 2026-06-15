@@ -1,0 +1,13 @@
+interface:
+  display_name: "Chanjet MCP"
+  short_description: "Use Changjie business API MCP tools."
+  default_prompt: "Use $chanjet-mcp to handle this Changjie/Chanjet business API request."
+
+dependencies:
+  tools:
+    - type: "mcp"
+      value: "chanjet-mcp"
+      description: "Local Chanjet MCP server for T+, HYC, HSY, YDZ, and HKJ business API tools."
+
+policy:
+  allow_implicit_invocation: true
