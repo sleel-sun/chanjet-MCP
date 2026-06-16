@@ -11,3 +11,10 @@ dependencies:
 
 policy:
   allow_implicit_invocation: true
+  direct_tools:
+    - "call_natural"
+    - "call_api_smart"
+    - "search_api_templates"
+    - "call_api_template"
+    - "query_tplus_voucher_list_smart"
+    - "call_tplus_api_smart"
