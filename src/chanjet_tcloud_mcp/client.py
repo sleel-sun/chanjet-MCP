@@ -313,7 +313,7 @@ class ChanjetTCloudClient:
             raise ValueError("product_code is required")
         if not query:
             raise ValueError("query is required")
-        normalized_query = query.casefold()
+        normalized_query = self._normalize_match_value(query)
         matches: list[dict[str, Any]] = []
 
         module_tree = self.list_modules(product_code)
@@ -328,7 +328,14 @@ class ChanjetTCloudClient:
                     for value in (parent_code, parent_name, module_code, module_name)
                     if value
                 ).casefold()
-                if normalized_query not in haystack:
+                if not self._module_search_matches(
+                    normalized_query,
+                    raw_haystack=haystack,
+                    parent_code=parent_code,
+                    parent_name=parent_name,
+                    module_code=module_code,
+                    module_name=module_name,
+                ):
                     continue
                 matches.append(
                     {
@@ -342,6 +349,58 @@ class ChanjetTCloudClient:
                 if len(matches) >= limit:
                     return matches
         return matches
+
+    def _module_search_matches(
+        self,
+        normalized_query: str,
+        *,
+        raw_haystack: str,
+        parent_code: Any,
+        parent_name: Any,
+        module_code: Any,
+        module_name: Any,
+    ) -> bool:
+        if not normalized_query:
+            return False
+        normalized_haystack = self._normalize_match_value(raw_haystack)
+        if normalized_query in normalized_haystack:
+            return True
+
+        parent_values = [
+            self._normalize_match_value(value)
+            for value in (parent_code, parent_name)
+            if value
+        ]
+        child_values = [
+            self._normalize_match_value(value)
+            for value in (module_code, module_name)
+            if value
+        ]
+
+        if any(
+            normalized_query in value or value in normalized_query
+            for value in child_values
+        ):
+            return True
+
+        if any(normalized_query in value for value in parent_values):
+            return True
+
+        for parent_value in parent_values:
+            for child_value in child_values:
+                if not parent_value or not child_value:
+                    continue
+                combined = f"{parent_value}{child_value}"
+                reversed_combined = f"{child_value}{parent_value}"
+                if normalized_query in {combined, reversed_combined}:
+                    return True
+                if (
+                    normalized_query in combined
+                    or normalized_query in reversed_combined
+                    or all(part in normalized_query for part in (parent_value, child_value))
+                ):
+                    return True
+        return False
 
     def search_tcloud_docs(self, query: str, limit: int = 20) -> list[dict[str, Any]]:
         return self.search_docs(TCLOUD_PRODUCT_CODE, query, limit)

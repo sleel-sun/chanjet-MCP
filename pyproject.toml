@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "chanjet-tcloud-mcp"
-version = "0.1.7"
+version = "0.1.8"
 description = "MCP server for Chanjet T+Cloud, HYC/ZPlus, HSY, YDZ/Finance, and HKJ/Accounting OpenAPI documentation and API calls"
 readme = "README.md"
 requires-python = ">=3.10"

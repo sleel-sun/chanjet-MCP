@@ -47,6 +47,12 @@ Use the configured Chanjet MCP tools as the execution layer. This skill provides
 - Do not invent field codes when mapping fails. Use `get_api_call_template`, `search_api_templates`, or field lookup tools to inspect available fields.
 - If the MCP implementation does not support automatic label mapping on raw calls, fall back to `call_api_smart` or inspect templates before calling.
 
+## Template Matching
+
+- Basic archives and document templates may be described as parent + object phrases such as `基础档案仓库`, `基础档案客户`, or `单据模板销货单`.
+- Do not stop after matching only a parent module such as `基础档案`; continue through `call_natural` or `search_api_templates` until a callable child template is selected.
+- Once the child template is selected, pass Chinese labels normally through `fields`, `filters`, and `display_fields`; the MCP handles label-to-code conversion when template metadata is available.
+
 ## T+ Specifics
 
 - `voucher_name` is the human document name, such as `销货单` or `生产加工单`.
